@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 from attack_core.attack_records import load_attacked_samples
 from attack_core.model_loader import load_vlm
+from attack_core.reproducibility import seed_everything
 from attack_core.run_outputs import append_jsonl, append_text, write_csv, write_json
 from attack_core.u2bench import decode_base64_image
 from attack_core.vlm_scoring import compute_scores, format_option_scores
@@ -78,16 +79,11 @@ class RandomInsertPerturbation(Perturbation):
         return "".join(list_s)
 
 
-class Prompt:
-    def __init__(self, full_prompt: str, perturbable_prompt: str, frozen_suffix: str):
-        self.full_prompt = full_prompt
-        self.perturbable_prompt = perturbable_prompt
-        self.frozen_suffix = frozen_suffix
-
-    def perturb(self, perturbation_fn):
-        perturbed_prompt = perturbation_fn(self.perturbable_prompt)
-        self.perturbable_prompt = perturbed_prompt
-        self.full_prompt = perturbed_prompt + self.frozen_suffix
+PERTURBATION_TYPES = {
+    "RandomSwapPerturbation": RandomSwapPerturbation,
+    "RandomPatchPerturbation": RandomPatchPerturbation,
+    "RandomInsertPerturbation": RandomInsertPerturbation,
+}
 
 
 def _prediction_support_score(summary: dict, label: str) -> float:
@@ -97,18 +93,12 @@ def _prediction_support_score(summary: dict, label: str) -> float:
     if label in scores:
         try:
             return float(scores[label])
-        except Exception:
-            pass
-    gen_scores = summary.get("generation_option_scores") or {}
-    if label in gen_scores:
-        try:
-            return float(gen_scores[label])
-        except Exception:
-            pass
-    return float(summary.get("reward", 0.0))
+        except (TypeError, ValueError):
+            return float("-inf")
+    return float("-inf")
 
 
-def choose_majority_prediction(results: List[dict], prediction_source: str) -> Tuple[str, List[dict]]:
+def choose_majority_prediction(results: List[dict]) -> Tuple[str, List[dict]]:
     if not results:
         return "", []
     grouped: Dict[str, List[dict]] = defaultdict(list)
@@ -139,8 +129,6 @@ class SmoothVLMDefense:
         self,
         vlm,
         proc,
-        prediction_source: str,
-        reward_source: str,
         pert_type: str,
         pert_pct: int,
         num_copies: int,
@@ -148,11 +136,9 @@ class SmoothVLMDefense:
     ):
         self.vlm = vlm
         self.proc = proc
-        self.prediction_source = prediction_source
-        self.reward_source = reward_source
         self.num_copies = num_copies
         self.system_prompt = system_prompt
-        self.perturbation_fn = globals()[pert_type](q=pert_pct)
+        self.perturbation_fn = PERTURBATION_TYPES[pert_type](q=pert_pct)
 
     def __call__(self, sample: dict) -> dict:
         image = decode_base64_image(sample["img_data"])
@@ -164,38 +150,32 @@ class SmoothVLMDefense:
             sample["attacked_question"],
             sample["options"],
             sample["truth"],
-            prediction_source=self.prediction_source,
-            reward_source=self.reward_source,
         )
 
         copy_results = []
         for copy_index in range(self.num_copies):
-            prompt_copy = Prompt(
-                full_prompt=sample["attacked_question"],
-                perturbable_prompt=sample["editable_prompt"],
-                frozen_suffix=sample["frozen_suffix"],
+            question = (
+                self.perturbation_fn(sample["editable_prompt"])
+                + sample["frozen_suffix"]
             )
-            prompt_copy.perturb(self.perturbation_fn)
             scores = compute_scores(
                 self.vlm,
                 self.proc,
                 image,
                 self.system_prompt,
-                prompt_copy.full_prompt,
+                question,
                 sample["options"],
                 sample["truth"],
-                prediction_source=self.prediction_source,
-                reward_source=self.reward_source,
             )
             copy_results.append(
                 {
                     "copy_index": copy_index,
-                    "question": prompt_copy.full_prompt,
+                    "question": question,
                     "scores": scores,
                 }
             )
 
-        defended_label, majority_group = choose_majority_prediction(copy_results, self.prediction_source)
+        defended_label, majority_group = choose_majority_prediction(copy_results)
         defended_scores = None
         representative_question = sample["attacked_question"]
         if majority_group:
@@ -282,8 +262,6 @@ def parse_args(repo_root: Path):
         help="Root directory containing the local u2-bench TSV files.",
     )
     parser.add_argument("--vlm-id", type=str, default="google/medgemma-4b-it")
-    parser.add_argument("--prediction-source", type=str, default="pred", choices=["pred", "real_pred"])
-    parser.add_argument("--reward-source", type=str, default="margin")
     parser.add_argument("--num-copies", type=int, default=10)
     parser.add_argument(
         "--perturbation-type",
@@ -303,7 +281,7 @@ def parse_args(repo_root: Path):
 def main():
     repo_root = Path(__file__).resolve().parents[1]
     args = parse_args(repo_root)
-    random.seed(args.seed)
+    seed_everything(args.seed)
 
     attack_input = Path(args.attack_input).expanduser().resolve()
     dataset_root = Path(args.dataset_root).expanduser().resolve()
@@ -339,8 +317,6 @@ def main():
             f"Attack input: {attack_input}",
             f"Dataset root: {dataset_root}",
             f"VLM: {args.vlm_id}",
-            f"Prediction source: {args.prediction_source}",
-            f"Reward source: {args.reward_source}",
             f"Smooth copies: {args.num_copies}",
             f"Perturbation: {args.perturbation_type} ({args.perturbation_pct}%)",
             f"Samples loaded: {len(samples)}",
@@ -351,8 +327,6 @@ def main():
     defense = SmoothVLMDefense(
         vlm=vlm,
         proc=proc,
-        prediction_source=args.prediction_source,
-        reward_source=args.reward_source,
         pert_type=args.perturbation_type,
         pert_pct=args.perturbation_pct,
         num_copies=args.num_copies,
@@ -387,7 +361,7 @@ def main():
             "tsv_file": Path(sample["tsv_path"]).name,
             "index": sample["row_index"],
             "actual_label": sample["truth"],
-            "prediction_source": args.prediction_source,
+            "prediction_source": "pred",
             "base_label": result["base_label"],
             "label_after_attack": sample["label_after_attack"] or result["base_label"],
             "defended_label": result["defended_label"],

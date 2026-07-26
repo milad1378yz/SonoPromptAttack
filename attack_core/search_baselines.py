@@ -7,12 +7,12 @@ def _reward(scores: Dict[str, Any]) -> float:
     return float(scores.get("reward", scores.get("margin", 0.0)))
 
 
-def _chosen_pred(scores: Dict[str, Any], prediction_source: str) -> str:
-    return str(scores.get(prediction_source) or scores.get("pred") or "")
+def _chosen_pred(scores: Dict[str, Any]) -> str:
+    return str(scores.get("pred") or "")
 
 
-def _is_attack(scores: Dict[str, Any], truth_label: str, prediction_source: str) -> bool:
-    chosen = _chosen_pred(scores, prediction_source)
+def _is_attack(scores: Dict[str, Any], truth_label: str) -> bool:
+    chosen = _chosen_pred(scores)
     return bool(truth_label) and bool(chosen) and chosen.lower() != str(truth_label).lower()
 
 
@@ -23,7 +23,6 @@ def _history_entry(
     scores: Dict[str, Any],
     parent_scores: Dict[str, Any],
     transition: Tuple[str, str],
-    prediction_source: str,
     truth_label: str,
 ) -> Dict[str, Any]:
     truth_new = float(scores.get("truth_score", 0.0))
@@ -45,9 +44,8 @@ def _history_entry(
         "delta_attack_margin": round(margin_new - margin_prev, 3),
         "transition": f"{transition[0]} : {transition[1]}",
         "pred": scores.get("pred"),
-        "real_pred": scores.get("real_pred"),
-        "chosen_pred": _chosen_pred(scores, prediction_source),
-        "prediction_source": prediction_source,
+        "chosen_pred": _chosen_pred(scores),
+        "prediction_source": "pred",
         "truth": truth_label,
     }
 
@@ -60,11 +58,8 @@ class _SearchState:
     depth: int = 0
 
 
-class GeneticSearch:
-    """
-    Genetic-style iteratively accepts minimal edits
-    that reduce the truth score or flip the prediction.
-    """
+class HillClimbingSearch:
+    """Iteratively accept the best proposed edit until the prediction flips."""
 
     def __init__(
         self,
@@ -72,7 +67,6 @@ class GeneticSearch:
         proposer,
         apply_edit,
         truth_label: str,
-        prediction_source: str = "pred",
         max_steps: int = 50,
         generations_per_step: int = 6,
         attempt_multiplier: int = 40,
@@ -82,7 +76,6 @@ class GeneticSearch:
         self.proposer = proposer
         self.apply_edit = apply_edit
         self.truth_label = truth_label
-        self.prediction_source = prediction_source
         self.max_steps = max_steps
         self.generations_per_step = generations_per_step
         self.attempt_multiplier = attempt_multiplier
@@ -146,17 +139,17 @@ class GeneticSearch:
                         continue
                     try:
                         scores = self.scorer(mutated_question)
-                    except Exception:
-                        continue
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "Failed to score hill-climbing candidate "
+                            f"{mutated_question!r} produced by edit {prev!r} -> {new!r}."
+                        ) from exc
                     evaluations += 1
                     self.visited_questions.add(mutated_question)
                     reward_new = float(scores.get("reward", scores.get("margin", 0.0)))
                     delta_reward = reward_new - reward_prev
-                    delta_truth = scores["truth_score"] - truth_prev
                     improves_reward = delta_reward > 1e-9
-                    chosen_pred = str(
-                        scores.get(self.prediction_source) or scores.get("pred") or ""
-                    )
+                    chosen_pred = _chosen_pred(scores)
                     flips = bool(chosen_pred) and chosen_pred.lower() != self.truth_label.lower()
                     if flips:
                         best_choice = (mutated_question, (prev, new), scores)
@@ -200,10 +193,7 @@ class GeneticSearch:
 
             mutated_question, chosen, new_scores = best_choice
 
-            pred = new_scores["pred"]
-            chosen_pred = str(
-                new_scores.get(self.prediction_source) or new_scores.get("pred") or ""
-            )
+            chosen_pred = _chosen_pred(new_scores)
             reward_new = float(new_scores.get("reward", new_scores.get("margin", 0.0)))
             margin_new = new_scores["margin"]
             truth_new = new_scores["truth_score"]
@@ -225,10 +215,9 @@ class GeneticSearch:
                     "attack_margin": round(margin_new, 3),
                     "delta_attack_margin": round(delta_margin, 3),
                     "transition": (f"{chosen[0]} : {chosen[1]}" if chosen else None),
-                    "pred": pred,
-                    "real_pred": new_scores.get("real_pred"),
+                    "pred": new_scores.get("pred"),
                     "chosen_pred": chosen_pred,
-                    "prediction_source": self.prediction_source,
+                    "prediction_source": "pred",
                     "truth": self.truth_label,
                 }
             )
@@ -267,7 +256,6 @@ class RandomSearch:
         proposer,
         apply_edit,
         truth_label: str,
-        prediction_source: str = "pred",
         max_iterations: int = 80,
         max_depth: int = 8,
         max_children_per_expand: int = 3,
@@ -276,7 +264,6 @@ class RandomSearch:
         self.proposer = proposer
         self.apply_edit = apply_edit
         self.truth_label = truth_label
-        self.prediction_source = prediction_source
         self.max_iterations = max_iterations
         self.max_depth = max_depth
         self.max_children = max_children_per_expand
@@ -295,7 +282,7 @@ class RandomSearch:
         history: List[Dict[str, Any]] = []
         evaluations = 0
         attack_state: Optional[_SearchState] = (
-            root if _is_attack(root.scores, self.truth_label, self.prediction_source) else None
+            root if _is_attack(root.scores, self.truth_label) else None
         )
 
         while evaluations < self.max_iterations and attack_state is None:
@@ -315,8 +302,11 @@ class RandomSearch:
                     continue
                 try:
                     scores = self.scorer(mutated)
-                except Exception:
-                    continue
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Failed to score random-search candidate "
+                        f"{mutated!r} produced by edit {prev!r} -> {new!r}."
+                    ) from exc
 
                 evaluations += 1
                 expanded += 1
@@ -342,14 +332,13 @@ class RandomSearch:
                         scores=scores,
                         parent_scores=parent.scores,
                         transition=(prev, new),
-                        prediction_source=self.prediction_source,
                         truth_label=self.truth_label,
                     )
                 )
 
                 if _reward(scores) > _reward(best.scores):
                     best = child
-                if _is_attack(scores, self.truth_label, self.prediction_source):
+                if _is_attack(scores, self.truth_label):
                     attack_state = child
                     break
 
@@ -376,7 +365,6 @@ class GreedySearch:
         proposer,
         apply_edit,
         truth_label: str,
-        prediction_source: str = "pred",
         max_iterations: int = 80,
         max_depth: int = 8,
         max_children_per_expand: int = 3,
@@ -385,7 +373,6 @@ class GreedySearch:
         self.proposer = proposer
         self.apply_edit = apply_edit
         self.truth_label = truth_label
-        self.prediction_source = prediction_source
         self.max_iterations = max_iterations
         self.max_depth = max_depth
         self.max_children = max_children_per_expand
@@ -408,7 +395,7 @@ class GreedySearch:
         depth = 0
         self.visited_questions.add(question)
 
-        if _is_attack(current_scores, self.truth_label, self.prediction_source):
+        if _is_attack(current_scores, self.truth_label):
             return {
                 "success": True,
                 "question": question,
@@ -431,8 +418,11 @@ class GreedySearch:
                     continue
                 try:
                     scores = self.scorer(mutated)
-                except Exception:
-                    continue
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Failed to score greedy-search candidate "
+                        f"{mutated!r} produced by edit {prev!r} -> {new!r}."
+                    ) from exc
 
                 evaluations += 1
                 self.visited_questions.add(mutated)
@@ -450,7 +440,6 @@ class GreedySearch:
                         scores=scores,
                         parent_scores=parent_scores,
                         transition=(prev, new),
-                        prediction_source=self.prediction_source,
                         truth_label=self.truth_label,
                     )
                 )
@@ -464,7 +453,7 @@ class GreedySearch:
                     best_transitions = transitions + [
                         {"prev": prev, "new": new, "delta": delta_truth}
                     ]
-                if _is_attack(scores, self.truth_label, self.prediction_source):
+                if _is_attack(scores, self.truth_label):
                     best_question = mutated
                     best_scores = scores
                     delta_truth = float(scores.get("truth_score", 0.0)) - float(
@@ -516,7 +505,6 @@ class BeamSearch:
         proposer,
         apply_edit,
         truth_label: str,
-        prediction_source: str = "pred",
         max_iterations: int = 80,
         max_depth: int = 8,
         max_children_per_expand: int = 3,
@@ -526,7 +514,6 @@ class BeamSearch:
         self.proposer = proposer
         self.apply_edit = apply_edit
         self.truth_label = truth_label
-        self.prediction_source = prediction_source
         self.max_iterations = max_iterations
         self.max_depth = max_depth
         self.max_children = max_children_per_expand
@@ -545,7 +532,7 @@ class BeamSearch:
         history: List[Dict[str, Any]] = []
         evaluations = 0
         attack_state: Optional[_SearchState] = (
-            root if _is_attack(root.scores, self.truth_label, self.prediction_source) else None
+            root if _is_attack(root.scores, self.truth_label) else None
         )
 
         pool: List[_SearchState] = [root]
@@ -576,8 +563,11 @@ class BeamSearch:
                         continue
                     try:
                         scores = self.scorer(mutated)
-                    except Exception:
-                        continue
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "Failed to score beam-search candidate "
+                            f"{mutated!r} produced by edit {prev!r} -> {new!r}."
+                        ) from exc
 
                     evaluations += 1
                     expanded += 1
@@ -606,14 +596,13 @@ class BeamSearch:
                             scores=scores,
                             parent_scores=parent.scores,
                             transition=(prev, new),
-                            prediction_source=self.prediction_source,
                             truth_label=self.truth_label,
                         )
                     )
 
                     if _reward(scores) > _reward(best.scores):
                         best = child
-                    if _is_attack(scores, self.truth_label, self.prediction_source):
+                    if _is_attack(scores, self.truth_label):
                         attack_state = child
                         break
                 if attack_state is not None:

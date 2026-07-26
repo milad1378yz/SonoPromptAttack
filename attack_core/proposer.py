@@ -42,24 +42,12 @@ def _strip_history_metadata(s: str) -> str:
     return re.sub(r"\s{2,}", " ", s).strip()
 
 
-def _contains_cjk(text: str) -> bool:
-    text = str(text or "")
-    return bool(
-        re.search(
-            r"[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u3040-\u30FF\uAC00-\uD7AF]",
-            text,
-        )
-    )
-
-
 def _looks_english_replacement(text: str) -> bool:
     text = str(text or "").strip()
     if not text:
         return False
     lowered = text.lower()
     if not text.isascii():
-        return False
-    if _contains_cjk(text):
         return False
     if re.search(r"\b(score_delta|delta_truth)\b|\u0394truth", text, flags=re.IGNORECASE):
         return False
@@ -137,10 +125,10 @@ def _parse_replacement_lines(text: str):
     return pairs
 
 
-def _apply_minimal_replacement(base_text: str, prev: str, new: str) -> str:
+def apply_minimal_replacement(base_text: str, prev: str, new: str) -> str:
     if re.fullmatch(r"\w+", prev):
         pattern = re.compile(rf"\b{re.escape(prev)}\b")
-        return pattern.sub(re.escape(new), base_text, count=1)
+        return pattern.sub(lambda _match: new, base_text, count=1)
     idx = base_text.find(prev)
     if idx == -1:
         return base_text
@@ -368,7 +356,7 @@ def llm_suggest_pairs(
                 continue
             if not _looks_english_replacement(prev) or not _looks_english_replacement(new):
                 attempt_rejections.append(
-                    f"`{prev} : {new}` rejected: non-English or CJK text detected. Use English only."
+                    f"`{prev} : {new}` rejected: non-English text detected. Use English only."
                 )
                 continue
             if (pl, nl) in blocked:

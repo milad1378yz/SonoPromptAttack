@@ -30,21 +30,11 @@ class MCTSNode:
     def pred(self) -> str:
         return str(self.scores.get("pred", ""))
 
-    @property
-    def real_pred(self) -> str:
-        return str(self.scores.get("real_pred", "") or "")
-
-    def chosen_pred(self, prediction_source: str) -> str:
-        if prediction_source == "real_pred":
-            return self.real_pred
-        return self.pred
-
-    def is_attack(self, prediction_source: str) -> bool:
-        chosen = self.chosen_pred(prediction_source)
+    def is_attack(self) -> bool:
         return (
             bool(self.truth_label)
-            and bool(chosen)
-            and chosen.lower() != str(self.truth_label).lower()
+            and bool(self.pred)
+            and self.pred.lower() != str(self.truth_label).lower()
         )
 
 
@@ -55,7 +45,6 @@ class MCTS:
         proposer: Callable[[str, List[Dict[str, Any]]], List[Tuple[str, str]]],
         apply_edit: Callable[[str, str, str], str],
         truth_label: str,
-        prediction_source: str = "pred",
         max_depth: int = 8,
         exploration: float = 1.4,
         max_iterations: int = 160,
@@ -65,7 +54,6 @@ class MCTS:
         self.proposer = proposer
         self.apply_edit = apply_edit
         self.truth_label = truth_label
-        self.prediction_source = prediction_source
         self.max_depth = max_depth
         self.exploration = exploration
         self.max_iterations = max_iterations
@@ -79,13 +67,13 @@ class MCTS:
         )
         self.visited_questions.add(root_question)
         best_node = root
-        attack_node = root if root.is_attack(self.prediction_source) else None
+        attack_node = root if root.is_attack() else None
 
         evaluations = 0
 
         while evaluations < self.max_iterations and attack_node is None:
             node = self._select(root)
-            if node.is_attack(self.prediction_source):
+            if node.is_attack():
                 attack_node = node
                 break
 
@@ -96,7 +84,8 @@ class MCTS:
                 self._backprop(node, self._node_reward(node))
                 continue
 
-            new_children = self._expand(node)
+            remaining_evaluations = self.max_iterations - evaluations
+            new_children = self._expand(node, remaining_evaluations)
             evaluations += len(new_children)
             if progress is not None and new_children:
                 progress.update(len(new_children))
@@ -111,7 +100,7 @@ class MCTS:
                 self._backprop(child, self._node_reward(child))
                 if child.reward > best_node.reward:
                     best_node = child
-                if child.is_attack(self.prediction_source):
+                if child.is_attack():
                     attack_node = child
                     break
 
@@ -120,6 +109,7 @@ class MCTS:
             "attack_node": attack_node,
             "best_node": best_node,
             "trace": self.trace,
+            "evaluations": evaluations,
             # Minimal tree snapshot: each node keeps only its score.
             "score_tree": self._score_tree(root),
         }
@@ -149,7 +139,7 @@ class MCTS:
             math.log(parent.visits + 1) / child.visits
         )
 
-    def _expand(self, node: MCTSNode) -> List[MCTSNode]:
+    def _expand(self, node: MCTSNode, evaluation_budget: int) -> List[MCTSNode]:
         transitions = self._path_transitions(node)
         pairs = self.proposer(node.question, transitions) or []
         # Avoid retrying the same edit pairs for a node.
@@ -160,6 +150,8 @@ class MCTS:
         }
         children = []
         for prev, new in pairs:
+            if len(children) >= min(self.max_children, evaluation_budget):
+                break
             mutated = self.apply_edit(node.question, prev, new)
             if mutated == node.question:
                 continue
@@ -170,8 +162,11 @@ class MCTS:
                 continue
             try:
                 scores = self.scorer(mutated)
-            except Exception:
-                continue
+            except Exception as exc:
+                raise RuntimeError(
+                    "Failed to score MCTS candidate "
+                    f"{mutated!r} produced by edit {prev!r} -> {new!r}."
+                ) from exc
 
             child = MCTSNode(
                 question=mutated,
@@ -187,8 +182,6 @@ class MCTS:
             existing_pairs.add(key_pair)
             children.append(child)
             self.trace.append(self._trace_entry(child))
-            if len(children) >= self.max_children:
-                break
         return children
 
     def _trace_entry(self, node: MCTSNode) -> Dict[str, Any]:
@@ -212,23 +205,9 @@ class MCTS:
             "delta_margin": float(delta_margin),
             "delta_reward": float(delta_reward),
             "pred": node.pred,
-            "real_pred": node.real_pred,
-            "real_runner_up": node.scores.get("real_runner_up"),
-            "real_runner_up_source": node.scores.get("real_runner_up_source"),
-            "real_pred_sequence_score": node.scores.get("real_pred_sequence_score"),
-            "real_runner_up_sequence_score": node.scores.get("real_runner_up_sequence_score"),
-            "real_runner_up_score_fallback": node.scores.get("real_runner_up_score_fallback"),
-            "generation_option_pred": node.scores.get("generation_option_pred"),
-            "generation_option_pred_score": node.scores.get("generation_option_pred_score"),
-            "generation_option_runner_up": node.scores.get("generation_option_runner_up"),
-            "generation_option_runner_up_score": node.scores.get(
-                "generation_option_runner_up_score"
-            ),
-            "generation_option_gap": node.scores.get("generation_option_gap"),
-            "generation_option_margin": node.scores.get("generation_option_margin"),
-            "chosen_pred": node.chosen_pred(self.prediction_source),
-            "prediction_source": self.prediction_source,
-            "decoded_output": node.scores.get("decoded_output"),
+            "runner_up": node.scores.get("runner_up"),
+            "chosen_pred": node.pred,
+            "prediction_source": "pred",
             "truth": node.truth_label,
             "real_label": node.truth_label,
         }
