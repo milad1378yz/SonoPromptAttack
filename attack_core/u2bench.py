@@ -44,6 +44,24 @@ def parse_options(options_field):
     return [p.strip().strip("'\"") for p in parts if p.strip()]
 
 
+def parse_first_option_group(options_field) -> list[str]:
+    """Parse only the first option group from a multi-task options field."""
+    text = str(options_field).strip()
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        try:
+            parsed = ast.literal_eval(text)
+        except Exception:
+            return parse_options(options_field)
+
+    if isinstance(parsed, dict):
+        parsed = next(iter(parsed.values()), [])
+    if isinstance(parsed, (list, tuple)):
+        return [str(option) for option in parsed]
+    return parse_options(options_field)
+
+
 def split_prompt_options(prompt: str) -> tuple[str, str]:
     """Split a U2-Bench prompt into editable text and its options suffix."""
     text = str(prompt or "")

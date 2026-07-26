@@ -11,7 +11,7 @@ import textattack
 import torch
 
 from attack_core.model_loader import load_vlm
-from attack_core.u2bench import decode_base64_image, parse_options
+from attack_core.u2bench import decode_base64_image, parse_first_option_group
 from attack_core.vlm_scoring import score_candidate
 from text_attack.medgemma_attack_common import (
     IMAGE_TSV_ROW_PREFIX,
@@ -124,7 +124,7 @@ def _load_options(tsv_path: Path) -> list[str]:
     df = pd.read_csv(tsv_path, sep="\t")
     return [
         option.strip()
-        for option in parse_options(df.iloc[0]["options"])
+        for option in parse_first_option_group(df.iloc[0]["options"])
         if option.strip()
     ]
 

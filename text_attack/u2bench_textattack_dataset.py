@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import textattack
 
-from attack_core.u2bench import parse_options, split_prompt_options
+from attack_core.u2bench import parse_first_option_group, split_prompt_options
 from text_attack.medgemma_attack_common import image_placeholder
 
 
@@ -17,7 +17,7 @@ def _textattack_tsv_path() -> Path:
 
 def _load_dataset(tsv_path: Path):
     df = pd.read_csv(tsv_path, sep="\t")
-    label_names = parse_options(df.iloc[0]["options"])
+    label_names = parse_first_option_group(df.iloc[0]["options"])
     label_map = {name: idx for idx, name in enumerate(label_names)}
     rows = []
 
