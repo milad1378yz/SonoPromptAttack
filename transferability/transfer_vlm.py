@@ -1,38 +1,18 @@
 import argparse
 import json
-import random
 import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional
 
-import torch
 from tqdm import tqdm
 
 from attack_core.attack_records import load_attacked_samples
 from attack_core.model_loader import load_vlm
+from attack_core.reproducibility import seed_everything
 from attack_core.run_outputs import append_jsonl, append_text, write_csv, write_json
 from attack_core.u2bench import decode_base64_image
 from attack_core.vlm_scoring import compute_scores, format_option_scores
-
-
-def _set_seed(seed: int) -> None:
-    random.seed(seed)
-    try:
-        import numpy as np
-
-        np.random.seed(seed)
-    except Exception:
-        pass
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-    try:
-        torch.use_deterministic_algorithms(True, warn_only=True)
-    except Exception:
-        pass
 
 
 def _safe_ratio(num: int, den: int) -> Optional[float]:
@@ -78,7 +58,7 @@ def _default_output_dir(attack_input: Path, target_vlm_id: str, repo_root: Path)
     return repo_root / "transferability" / "results" / safe_model / safe_source_llm / safe_task_name
 
 
-def evaluate_transfer_sample(sample: dict, vlm, proc, prediction_source: str, reward_source: str):
+def evaluate_transfer_sample(sample: dict, vlm, proc):
     image = decode_base64_image(sample["img_data"])
     options = [str(o).strip() for o in sample["options"] if str(o).strip()]
     truth = str(sample["truth"])
@@ -93,8 +73,6 @@ def evaluate_transfer_sample(sample: dict, vlm, proc, prediction_source: str, re
         original_question,
         options,
         truth,
-        prediction_source=prediction_source,
-        reward_source=reward_source,
     )
     attacked_scores = compute_scores(
         vlm,
@@ -104,8 +82,6 @@ def evaluate_transfer_sample(sample: dict, vlm, proc, prediction_source: str, re
         attacked_question,
         options,
         truth,
-        prediction_source=prediction_source,
-        reward_source=reward_source,
     )
 
     base_label = str(base_scores.get("pred") or "")
@@ -180,7 +156,6 @@ def build_overview(
     attack_input: Path,
     dataset_root: Path,
     target_vlm_id: str,
-    prediction_source: str,
     successful_only: bool,
     skipped: int,
     seed: Optional[int] = None,
@@ -193,7 +168,7 @@ def build_overview(
         "attack_input": str(attack_input),
         "dataset_root": str(dataset_root),
         "target_vlm_id": target_vlm_id,
-        "prediction_source": prediction_source,
+        "prediction_source": "pred",
         "source_successful_only": bool(successful_only),
         "evaluated_samples": total,
         "skipped_samples": int(skipped),
@@ -229,13 +204,6 @@ def parse_args(repo_root: Path):
         required=True,
         help="Second VLM to test transferability against.",
     )
-    parser.add_argument(
-        "--prediction-source",
-        type=str,
-        default="pred",
-        choices=["pred", "real_pred"],
-    )
-    parser.add_argument("--reward-source", type=str, default="margin")
     parser.add_argument("--seed", type=int, default=765, help="Random seed for reproducibility.")
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--output-dir", type=str, default="")
@@ -248,7 +216,7 @@ def main():
     repo_root = Path(__file__).resolve().parents[1]
     args = parse_args(repo_root)
     if args.seed is not None:
-        _set_seed(args.seed)
+        seed_everything(args.seed)
 
     attack_input = Path(args.attack_input).expanduser().resolve()
     dataset_root = Path(args.dataset_root).expanduser().resolve()
@@ -284,8 +252,6 @@ def main():
             f"Attack input: {attack_input}",
             f"Dataset root: {dataset_root}",
             f"Target VLM: {args.target_vlm_id}",
-            f"Prediction source: {args.prediction_source}",
-            f"Reward source: {args.reward_source}",
             f"Seed: {args.seed if args.seed is not None else '<unset>'}",
             f"Samples loaded: {len(samples)}",
             f"Source successful only: {not args.include_unsuccessful}",
@@ -303,13 +269,7 @@ def main():
     pbar = tqdm(samples, desc="Transferability")
     for sample in pbar:
         try:
-            result = evaluate_transfer_sample(
-                sample,
-                vlm,
-                proc,
-                args.prediction_source,
-                args.reward_source,
-            )
+            result = evaluate_transfer_sample(sample, vlm, proc)
         except Exception as exc:
             skipped += 1
             append_text(log_path, f"Skipping {sample['key']} due to runtime failure: {exc}")
@@ -335,7 +295,7 @@ def main():
             "actual_label": sample["truth"],
             "source_label_after_attack": sample["label_after_attack"],
             "source_prediction_source": sample["prediction_source"],
-            "target_prediction_source": args.prediction_source,
+            "target_prediction_source": "pred",
             "target_vlm_id": args.target_vlm_id,
             "target_base_label": result["base_label"],
             "target_attacked_label": result["attacked_label"],
@@ -379,7 +339,6 @@ def main():
         attack_input=attack_input,
         dataset_root=dataset_root,
         target_vlm_id=args.target_vlm_id,
-        prediction_source=args.prediction_source,
         successful_only=not args.include_unsuccessful,
         skipped=skipped,
         seed=args.seed,

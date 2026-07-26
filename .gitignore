@@ -1,33 +1,29 @@
-.vscode/
+# Local configuration and editor files
 .env
-__pycache__
-*.txt
-!requirements.txt
-*temp*
-cache/
-runs/
+.vscode/
 
-# Generated artifacts
-*.jsonl
-*.ipynb
-*.png
-*.csv
-*.pdf
-
-# Generated directories / outputs
-Baselines/
-Transition_Tables/
-Med VLM Results/
-text_attack/logs/
-__MACOSX/
+# Python-generated files
 __pycache__/
+*.py[cod]
 
-# Common run and cache outputs
-cache/
-runs/
-transferability/results
-defence/results
+# Scratch data, downloaded datasets, caches, and run outputs
+/temp/
+/dataset/
+/cache/
+/runs/
 
-dataset/
+# Default root-level outputs
+/attack_log.txt
+/attack_log_trees.jsonl
+/attack_log_sample_summaries/
 
-*.md
+# Legacy output locations
+/Baselines/
+/Transition_Tables/
+/Med VLM Results/
+/text_attack/logs/
+/transferability/results/
+/defence/results/
+
+# Archive metadata
+__MACOSX/

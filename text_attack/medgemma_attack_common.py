@@ -1,11 +1,11 @@
 """Shared TextAttack setup for MedGemma VLM datasets."""
 
 import os
-import random
 import sys
 import types
 from pathlib import Path
 
+from attack_core.reproducibility import seed_everything
 from textattack.constraints.overlap import LevenshteinEditDistance
 from textattack.constraints.pre_transformation import (
     InputColumnModification,
@@ -20,12 +20,14 @@ IMAGE_TSV_ROW_PREFIX = "__IMAGE_TSV_ROW_"
 
 def decode_textattack_field(text: str) -> str:
     """Decode one TextAttack CSV field the same way transferability does."""
-    return str(text or "").replace("\\n", "\n").strip()
+    return str(text or "").replace("\\n", "\n")
 
 
 def compose_transfer_prompt(editable_prompt: str, frozen_suffix: str) -> str:
     """Build the full question string that transferability reconstructs from CSV."""
-    return f"{decode_textattack_field(editable_prompt)}{decode_textattack_field(frozen_suffix)}".strip()
+    editable = decode_textattack_field(editable_prompt).strip()
+    suffix = decode_textattack_field(frozen_suffix).rstrip()
+    return f"{editable}{suffix}".strip()
 
 
 def maybe_set_seed() -> int | None:
@@ -37,32 +39,7 @@ def maybe_set_seed() -> int | None:
     except ValueError:
         return None
 
-    random.seed(seed)
-    try:
-        import numpy as np
-
-        np.random.seed(seed)
-    except Exception:
-        pass
-
-    try:
-        import torch
-
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
-            torch.backends.cudnn.deterministic = True
-            torch.backends.cudnn.benchmark = False
-        try:
-            torch.use_deterministic_algorithms(True, warn_only=True)
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
-
-    return seed
+    return seed_everything(seed)
 
 
 def image_placeholder(tsv_row_index: int) -> str:
@@ -78,12 +55,18 @@ def char_level_constraints(max_edit_distance: int = 30):
     ]
 
 
-def vlm_column_constraints():
-    return [
-        RepeatModification(),
-        StopwordModification(),
-        InputColumnModification(VLM_INPUT_COLUMNS, VLM_FROZEN_COLUMNS),
-    ]
+def force_tensorflow_cpu() -> None:
+    """Keep TensorFlow-based constraints from competing with the VLM for GPU memory."""
+    try:
+        import tensorflow as tf
+    except ImportError:
+        return
+
+    try:
+        tf.config.set_visible_devices([], "GPU")
+    except RuntimeError:
+        # TensorFlow does not allow changing visibility after device initialization.
+        pass
 
 
 def register_for_parallel_pickling(module_name: str, file_path: Path, exports: dict[str, object]) -> None:

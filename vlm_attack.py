@@ -1,6 +1,6 @@
 import argparse
-import re
 import json
+import re
 import time
 from datetime import datetime
 from pathlib import Path
@@ -10,14 +10,20 @@ from tqdm import tqdm
 
 from attack_core.mcts_search import MCTS
 from attack_core.model_loader import load_llm, load_vlm
+from attack_core.proposer import apply_minimal_replacement, llm_suggest_pairs
+from attack_core.reproducibility import seed_everything
 from attack_core.run_outputs import (
     append_jsonl,
     append_text,
     write_csv,
     write_json,
 )
-from attack_core.search_baselines import BeamSearch, GeneticSearch, GreedySearch, RandomSearch
-from attack_core.proposer import _apply_minimal_replacement, llm_suggest_pairs
+from attack_core.search_baselines import (
+    BeamSearch,
+    GeneticSearch,
+    GreedySearch,
+    RandomSearch,
+)
 from attack_core.u2bench import (
     find_lowconf_correct_samples_dataset_id,
     find_lowconf_correct_samples_dataset_path,
@@ -122,8 +128,7 @@ def _build_summary_record(
     final_scores,
     success,
     search_mode,
-    prediction_source,
-    reward_source,
+    evaluations,
 ):
     source_file, row_index = _sample_source_info(sample)
     final_scores = final_scores or {}
@@ -134,10 +139,11 @@ def _build_summary_record(
         "tsv_file": source_file,
         "index": row_index,
         "search_mode": search_mode,
+        "evaluations": int(evaluations),
         "success": bool(success),
         "attack_success": bool(success),
-        "prediction_source": prediction_source,
-        "reward_source": reward_source,
+        "prediction_source": "pred",
+        "reward_source": "margin",
         "real_label": truth,
         "actual_label": truth,
         "original_question": base_question,
@@ -189,6 +195,7 @@ def _export_attack_summaries(records, summary_dir: Path, summary_format: str):
                 "tsv_file",
                 "index",
                 "search_mode",
+                "evaluations",
                 "success",
                 "attack_success",
                 "prediction_source",
@@ -226,8 +233,6 @@ def parse_args():
     parser.add_argument(
         "--llm-id",
         default="qwen/qwen3-30b-a3b-instruct-2507",
-        # "Qwen/Qwen2.5-14B-Instruct",
-        # "Qwen/Qwen2.5-7B-Instruct",
         help="LLM to try for proposing edits.",
     )
     parser.add_argument(
@@ -309,25 +314,25 @@ def parse_args():
         "--search-mode",
         choices=["mcts", "ga", "random", "greedy", "beam"],
         default="mcts",
-        help="Search strategy: tree search (mcts), genetic-style hill climb (ga), random, greedy, or beam.",
+        help="Search strategy: tree search (mcts), genetic search (ga), random, greedy, or beam.",
     )
     parser.add_argument(
         "--ga-max-steps",
         type=int,
         default=50,
-        help="Maximum accepted edits when using the GA-style search.",
+        help="Maximum accepted edits during genetic search.",
     )
     parser.add_argument(
         "--ga-generations-per-step",
         type=int,
         default=3,
-        help="LLM proposal batches per GA step.",
+        help="LLM proposal batches per genetic-search step.",
     )
     parser.add_argument(
         "--ga-attempt-multiplier",
         type=int,
         default=8,
-        help="Safety multiplier for GA retries when no improving edits are found.",
+        help="Safety multiplier for retries when no improving edits are found.",
     )
     parser.add_argument(
         "--mcts-max-depth",
@@ -342,7 +347,9 @@ def parse_args():
         help="Exploration constant for UCT.",
     )
     parser.add_argument(
+        "--max-vlm-evaluations",
         "--mcts-max-iterations",
+        dest="max_vlm_evaluations",
         type=int,
         default=80,
         help="Maximum scorer evaluations during search (shared budget for all search modes).",
@@ -372,18 +379,6 @@ def parse_args():
         help="Optional cap on how many candidate samples to attack (e.g. 10 for a quick flow check).",
     )
     parser.add_argument(
-        "--reward-source",
-        choices=["margin"],
-        default="margin",
-        help="Reward used by search. Only the option-score margin is supported.",
-    )
-    parser.add_argument(
-        "--prediction-source",
-        choices=["pred"],
-        default="pred",
-        help="Correctness and attack success are based on option-score ranking (`pred`).",
-    )
-    parser.add_argument(
         "--reasoning-off",
         action="store_true",
         help="Whether to disable reasoning features in Gemma-4-26B",
@@ -393,101 +388,27 @@ def parse_args():
 
 def main():
     args = parse_args()
-    VLM_ID = args.vlm_id
-    LLM_ID = args.llm_id
-    # Logging setup (append to a single file each run)
+    seed_everything(args.seed)
+
+    vlm_id = args.vlm_id
+    llm_id = args.llm_id
     log_path = Path(args.log_path)
     tree_log_path = log_path.parent / f"{log_path.stem}_trees.jsonl"
-    tree_plot_dir = log_path.parent / f"{log_path.stem}_trees"
 
-    def _save_tree_plot(score_tree, title: str, filename: str):
-        """Render a minimal tree (margins only) and save to an image file."""
-        if not score_tree:
-            return
-        try:
-            import matplotlib.pyplot as plt
-        except Exception as exc:
-            msg = f"Skipping tree plot (matplotlib unavailable: {exc})"
-            print(msg)
-            append_text(log_path, msg)
-            return
-
-        nodes = []
-        edges = []
-        x_counter = 0
-
-        def _place(node, depth: int = 0):
-            nonlocal x_counter
-            node_id = len(nodes)
-            nodes.append({"score": float(node.get("score", 0.0)), "depth": depth, "x": None})
-            child_ids = []
-            for ch in node.get("children", []) or []:
-                cid = _place(ch, depth + 1)
-                edges.append((node_id, cid))
-                child_ids.append(cid)
-            if child_ids:
-                xs = [nodes[c]["x"] for c in child_ids]
-                nodes[node_id]["x"] = sum(xs) / len(xs)
-            else:
-                nodes[node_id]["x"] = x_counter
-                x_counter += 1
-            return node_id
-
-        _place(score_tree, 0)
-
-        xs = [n["x"] for n in nodes]
-        ys = [-n["depth"] for n in nodes]  # root at top
-        scores = [n["score"] for n in nodes]
-        max_depth = max((n["depth"] for n in nodes), default=0)
-
-        width = max(6.0, len(nodes) * 0.6)
-        height = max(3.5, (max_depth + 1) * 1.0)
-        fig, ax = plt.subplots(figsize=(width, height))
-
-        for p, c in edges:
-            ax.plot([nodes[p]["x"], nodes[c]["x"]], [ys[p], ys[c]], color="#999", linewidth=1)
-
-        scatter = ax.scatter(
-            xs, ys, c=scores, cmap="coolwarm", s=80, edgecolors="k", linewidths=0.5
-        )
-        for i, n in enumerate(nodes):
-            ax.text(
-                nodes[i]["x"],
-                ys[i] + 0.08,
-                f"{n['score']:.2f}",
-                ha="center",
-                va="bottom",
-                fontsize=7,
-            )
-
-        ax.set_axis_off()
-        ax.set_title(title)
-        cb = fig.colorbar(scatter, ax=ax, shrink=0.8)
-        cb.set_label("margin score")
-
-        tree_plot_dir.mkdir(parents=True, exist_ok=True)
-        out_path = tree_plot_dir / filename
-        fig.tight_layout()
-        fig.savefig(out_path, dpi=200)
-        plt.close(fig)
-        msg = f"Saved MCTS tree plot to {out_path}"
-        print(msg)
-        append_text(log_path, msg)
-
-    print(f"Loading VLM: {VLM_ID}")
-    vlm, vlm_proc = load_vlm(VLM_ID)
+    print(f"Loading VLM: {vlm_id}")
+    vlm, vlm_proc = load_vlm(vlm_id)
     if not args.use_api:
-        print(f"Loading LLM: {LLM_ID}")
-        llm, llm_tok = load_llm(LLM_ID, quantization=args.llm_quantization)
+        print(f"Loading LLM: {llm_id}")
+        llm, llm_tok = load_llm(llm_id, quantization=args.llm_quantization)
 
-    # Run header (after successful model resolution)
     run_header = [
         f"=== Run {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===",
-        f"VLM: {VLM_ID}",
-        f"Prediction source: {args.prediction_source}",
-        f"Reward source: {args.reward_source}",
+        f"VLM: {vlm_id}",
+        f"LLM: {llm_id}",
+        "Prediction source: pred",
+        "Reward source: margin",
+        f"Seed: {args.seed}",
     ]
-    # | LLM: {LLM_ID} (quant={args.llm_quantization})",
     append_text(log_path, run_header)
 
     if args.dataset_path:
@@ -502,7 +423,7 @@ def main():
     if args.cache_path:
         cache_path = args.cache_path
     else:
-        safe_vlm = re.sub(r"[^a-zA-Z0-9_.-]+", "_", VLM_ID)
+        safe_vlm = re.sub(r"[^a-zA-Z0-9_.-]+", "_", vlm_id)
         cache_path = str(Path("cache") / f"initial_scores_u2bench_{safe_vlm}.jsonl")
 
     summary_dir = (
@@ -540,7 +461,6 @@ def main():
         lowconf = load_candidate_samples_from_results_cache(
             dataset_path=u2_path,
             candidate_cache_source=args.candidate_cache_source,
-            prediction_source=args.prediction_source,
         )
     elif args.dataset_path:
         lowconf = find_lowconf_correct_samples_dataset_path(
@@ -550,8 +470,6 @@ def main():
             system_prompt=args.system_prompt,
             diff_threshold=gap_threshold,
             cache_path=cache_path,
-            prediction_source=args.prediction_source,
-            reward_source=args.reward_source,
             reasoning_off=args.reasoning_off,
             completed_keys=completed_keys,
         )
@@ -563,10 +481,18 @@ def main():
             system_prompt=args.system_prompt,
             diff_threshold=gap_threshold,
             cache_path=cache_path,
-            prediction_source=args.prediction_source,
-            reward_source=args.reward_source,
             reasoning_off=args.reasoning_off,
+            completed_keys=completed_keys,
         )
+
+    if completed_keys:
+        lowconf = [sample for sample in lowconf if str(sample.get("key", "")) not in completed_keys]
+        resume_msg = (
+            f"Resume enabled: found {len(completed_keys)} completed sample(s) in "
+            f"{progress_path}; {len(lowconf)} sample(s) remain."
+        )
+        print(resume_msg)
+        append_text(log_path, resume_msg)
 
     if not lowconf:
         if completed_keys:
@@ -591,31 +517,23 @@ def main():
         print("No low-confidence correct samples found. Falling back to first valid sample.")
         raise RuntimeError("No valid samples found for attack.")
 
-    total_candidates = len(lowconf)
+    remaining_candidates = len(lowconf)
     if args.max_samples is not None:
         max_samples = max(0, int(args.max_samples))
         lowconf = lowconf[:max_samples]
         print(
-            f"Found {total_candidates} candidates. "
+            f"Found {remaining_candidates} remaining candidates. "
             f"Limiting run to {len(lowconf)} sample(s) due to --max-samples={args.max_samples}."
         )
         append_text(
             log_path,
-            f"Found {total_candidates} candidates. "
+            f"Found {remaining_candidates} remaining candidates. "
             f"Limiting run to {len(lowconf)} sample(s) due to --max-samples={args.max_samples}.",
         )
     else:
-        print(f"Found {total_candidates} candidates. Will attack all (sorted by gap).")
+        print(f"Found {remaining_candidates} candidates. Will attack all (sorted by gap).")
 
-    total_candidates_before_resume = len(lowconf)
-    if completed_keys:
-        lowconf = [sample for sample in lowconf if str(sample.get("key", "")) not in completed_keys]
-        resume_msg = (
-            f"Resume enabled: found {len(completed_keys)} completed sample(s) in "
-            f"{progress_path}; {len(lowconf)} sample(s) remain."
-        )
-        print(resume_msg)
-        append_text(log_path, resume_msg)
+    selected_candidate_count = len(lowconf)
 
     success_count = 0
     failed_count = 0
@@ -640,8 +558,6 @@ def main():
                 question_text,
                 options,
                 truth,
-                prediction_source=args.prediction_source,
-                reward_source=args.reward_source,
                 reasoning_off=args.reasoning_off,
             )
 
@@ -650,7 +566,7 @@ def main():
             return (
                 f"real_label={truth} pred={scores.get('pred', '')} "
                 f"runner_up={scores.get('runner_up') or '-'} "
-                f"chosen_pred={chosen_pred} prediction_source={args.prediction_source}"
+                f"chosen_pred={chosen_pred} prediction_source=pred"
             )
 
         def _transition_records_from_list(items):
@@ -672,9 +588,7 @@ def main():
             base_scores = _score_question(base_question)
         else:
             base_scores = dict(base_scores)
-        base_scores = attach_reward_fields(
-            base_scores, truth, args.prediction_source, args.reward_source
-        )
+        base_scores = attach_reward_fields(base_scores)
         initial_gap = sample.get("gap")
         if initial_gap is None:
             initial_gap = base_scores.get("pred_gap", base_scores.get("gap", float("nan")))
@@ -698,7 +612,7 @@ def main():
             f"truth_score={base_scores.get('truth_score', float('nan')):.3f} "
             f"margin={base_scores.get('margin', float('nan')):.3f} "
             f"reward={base_scores.get('reward', float('nan')):.3f} "
-            f"reward_source={base_scores.get('reward_source', args.reward_source)}"
+            f"reward_source={base_scores.get('reward_source', 'margin')}"
         )
         if score_text:
             base_line += f" scores=[{score_text}]"
@@ -731,15 +645,14 @@ def main():
             searcher = search_cls(
                 scorer=_score_question,
                 proposer=pair_proposer,
-                apply_edit=_apply_minimal_replacement,
+                apply_edit=apply_minimal_replacement,
                 truth_label=truth,
-                prediction_source=args.prediction_source,
-                max_iterations=args.mcts_max_iterations,
+                max_iterations=args.max_vlm_evaluations,
                 max_depth=args.mcts_max_depth,
                 max_children_per_expand=args.mcts_max_children,
             )
             desc = args.search_mode.upper()
-            with tqdm(total=args.mcts_max_iterations, desc=desc, leave=False) as pbar:
+            with tqdm(total=args.max_vlm_evaluations, desc=desc, leave=False) as pbar:
                 search_result = searcher.search(base_question, base_scores, progress=pbar)
 
             final_scores = search_result.get("scores", {})
@@ -747,6 +660,12 @@ def main():
             transitions = _transition_records_from_list(search_result.get("transitions", []))
             label_line = _label_summary(final_scores)
             method_name = args.search_mode.capitalize()
+            evaluation_line = (
+                f"{method_name} scorer evaluations: "
+                f"{search_result['evaluations']}/{args.max_vlm_evaluations}."
+            )
+            print(evaluation_line)
+            append_text(log_path, evaluation_line)
             if search_result.get("success"):
                 trans_lines = [f"Transitions ({args.search_mode}):"]
                 for item in transitions:
@@ -784,8 +703,7 @@ def main():
                     final_scores=final_scores,
                     success=True,
                     search_mode=args.search_mode,
-                    prediction_source=args.prediction_source,
-                    reward_source=args.reward_source,
+                    evaluations=search_result["evaluations"],
                 )
 
             final_margin = float(final_scores.get("margin", float("nan")))
@@ -795,8 +713,8 @@ def main():
                 f"real_label={truth} final_pred={final_pred} "
                 f"margin={final_margin:.3f} "
                 f"reward={final_scores.get('reward', float('nan')):.3f} "
-                f"reward_source={final_scores.get('reward_source', args.reward_source)} "
-                f"evaluations={search_result.get('evaluations', len(search_result.get('history', [])))}"
+                f"reward_source={final_scores.get('reward_source', 'margin')} "
+                f"evaluations={search_result['evaluations']}"
             )
             print(done_line)
             print("\nFinal question:")
@@ -822,26 +740,30 @@ def main():
                 final_scores=final_scores,
                 success=False,
                 search_mode=args.search_mode,
-                prediction_source=args.prediction_source,
-                reward_source=args.reward_source,
+                evaluations=search_result["evaluations"],
             )
 
         if args.search_mode == "ga":
             ga_searcher = GeneticSearch(
                 scorer=_score_question,
                 proposer=pair_proposer,
-                apply_edit=_apply_minimal_replacement,
+                apply_edit=apply_minimal_replacement,
                 truth_label=truth,
-                prediction_source=args.prediction_source,
                 max_steps=args.ga_max_steps,
                 generations_per_step=args.ga_generations_per_step,
                 attempt_multiplier=args.ga_attempt_multiplier,
-                max_evaluations=args.mcts_max_iterations,
+                max_evaluations=args.max_vlm_evaluations,
             )
-            with tqdm(total=args.ga_max_steps, desc="GA", leave=False) as pbar:
+            with tqdm(total=args.ga_max_steps, desc="Genetic search", leave=False) as pbar:
                 ga_result = ga_searcher.search(base_question, base_scores, progress=pbar)
+            evaluation_line = (
+                "Genetic-search scorer evaluations: "
+                f"{ga_result['evaluations']}/{args.max_vlm_evaluations}."
+            )
+            print(evaluation_line)
+            append_text(log_path, evaluation_line)
             if ga_result["success"]:
-                trans_lines = ["Transitions (minimal):"]
+                trans_lines = ["Transitions (genetic search):"]
                 for i, t in enumerate(ga_result["transitions"], start=1):
                     d = float(t.get("delta", 0.0))
                     sign = "+" if d >= 0 else ""
@@ -851,7 +773,7 @@ def main():
                 final_scores = ga_result.get("scores", {})
                 final_question = ga_result.get("question", base_question)
                 label_line = _label_summary(final_scores)
-                print("\nSuccess: VLM misclassified with GA search.")
+                print("\nSuccess: VLM misclassified with genetic search.")
                 print("\n".join(trans_lines))
                 print("\nFinal question:")
                 print(final_question)
@@ -859,7 +781,10 @@ def main():
                 append_text(
                     log_path,
                     [
-                        "Result: misclassified via GA.",
+                        (
+                            "Result: misclassified via genetic search "
+                            f"after {ga_result['evaluations']} scorer evaluations."
+                        ),
                         *trans_lines,
                         "Final question:",
                         final_question,
@@ -874,13 +799,14 @@ def main():
                     truth=truth,
                     base_question=base_question,
                     final_question=final_question,
-                    transitions=_transition_records_from_list(ga_result.get("transitions", [])),
+                    transitions=_transition_records_from_list(
+                        ga_result.get("transitions", [])
+                    ),
                     base_scores=base_scores,
                     final_scores=final_scores,
                     success=True,
                     search_mode="ga",
-                    prediction_source=args.prediction_source,
-                    reward_source=args.reward_source,
+                    evaluations=ga_result["evaluations"],
                 )
             else:
                 final_scores = ga_result.get("scores", {})
@@ -888,12 +814,13 @@ def main():
                 final_pred = final_scores.get("pred", "")
                 final_question = ga_result.get("question", base_question)
                 done_line = (
-                    f"GA search finished without misclassification. "
+                    f"Genetic search finished without misclassification. "
                     f"real_label={truth} final_pred={final_pred} "
                     f"margin={final_margin:.3f} "
                     f"reward={final_scores.get('reward', float('nan')):.3f} "
-                    f"reward_source={final_scores.get('reward_source', args.reward_source)} "
-                    f"steps={len(ga_result.get('history', []))}"
+                    f"reward_source={final_scores.get('reward_source', 'margin')} "
+                    f"steps={len(ga_result.get('history', []))} "
+                    f"evaluations={ga_result['evaluations']}"
                 )
                 print(done_line)
                 print("\nFinal question:")
@@ -904,7 +831,7 @@ def main():
                         done_line,
                         "Final question:",
                         final_question,
-                        "Result: done (GA).",
+                        "Result: done (genetic search).",
                         "--- End Run ---",
                         "",
                     ],
@@ -914,30 +841,36 @@ def main():
                     truth=truth,
                     base_question=base_question,
                     final_question=final_question,
-                    transitions=_transition_records_from_list(ga_result.get("transitions", [])),
+                    transitions=_transition_records_from_list(
+                        ga_result.get("transitions", [])
+                    ),
                     base_scores=base_scores,
                     final_scores=final_scores,
                     success=False,
                     search_mode="ga",
-                    prediction_source=args.prediction_source,
-                    reward_source=args.reward_source,
+                    evaluations=ga_result["evaluations"],
                 )
 
         searcher = MCTS(
             scorer=_score_question,
             proposer=pair_proposer,
-            apply_edit=_apply_minimal_replacement,
+            apply_edit=apply_minimal_replacement,
             truth_label=truth,
-            prediction_source=args.prediction_source,
             max_depth=args.mcts_max_depth,
             exploration=args.mcts_exploration,
-            max_iterations=args.mcts_max_iterations,
+            max_iterations=args.max_vlm_evaluations,
             max_children_per_expand=args.mcts_max_children,
         )
 
         print(f"Starting MCTS attack search (max depth {args.mcts_max_depth})...\n")
-        with tqdm(total=args.mcts_max_iterations, desc="MCTS", leave=False) as pbar:
+        with tqdm(total=args.max_vlm_evaluations, desc="MCTS", leave=False) as pbar:
             result = searcher.search(base_question, base_scores, progress=pbar)
+
+        evaluation_line = (
+            f"MCTS scorer evaluations: {result['evaluations']}/{args.max_vlm_evaluations}."
+        )
+        print(evaluation_line)
+        append_text(log_path, evaluation_line)
 
         trace = result.get("trace", [])
         for idx, entry in enumerate(trace, start=1):
@@ -951,12 +884,12 @@ def main():
                 f"Node {idx} depth={entry['depth']}: real_label={truth} pred={entry.get('pred','')} "
                 f"runner_up={entry.get('runner_up') or '-'} "
                 f"chosen_pred={entry.get('chosen_pred') or '-'} "
-                f"prediction_source={entry.get('prediction_source') or args.prediction_source} "
+                f"prediction_source={entry.get('prediction_source') or 'pred'} "
                 f"gap={entry.get('pred_gap', entry.get('gap', float('nan'))):.3f} "
                 f"truth_score={entry['truth_score']:.3f} other={entry['best_other_score']:.3f} "
                 f"margin={entry['margin']:.3f} "
                 f"reward={entry.get('reward', float('nan')):.3f} "
-                f"reward_source={entry.get('reward_source') or args.reward_source} "
+                f"reward_source={entry.get('reward_source') or 'margin'} "
                 f"Δtruth={entry['delta_truth_score']:.3f} "
                 f"Δmargin={entry['delta_margin']:.3f} "
                 f"Δreward={entry.get('delta_reward', float('nan')):.3f} transition={trans_text}"
@@ -990,7 +923,7 @@ def main():
                     "runner_up_score": scores.get("runner_up_score"),
                     "chosen_pred": str(scores.get("pred") or ""),
                     "label_after_attack": str(scores.get("pred") or ""),
-                    "prediction_source": args.prediction_source,
+                    "prediction_source": "pred",
                     "margin": float(scores.get("margin", float("nan"))),
                     "reward": float(scores.get("reward", scores.get("margin", float("nan")))),
                     "reward_source": scores.get("reward_source"),
@@ -1003,7 +936,8 @@ def main():
                 "truth": truth,
                 "real_label": truth,
                 "actual_label": truth,
-                "prediction_source": args.prediction_source,
+                "prediction_source": "pred",
+                "evaluations": result["evaluations"],
                 "root_pred": base_scores.get("pred"),
                 "root_runner_up": base_scores.get("runner_up"),
                 "root_chosen_pred": str(base_scores.get("pred") or ""),
@@ -1038,13 +972,6 @@ def main():
                 "tree": score_tree,
             }
             append_jsonl(tree_log_path, tree_record)
-            safe_key = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(sample.get("key", "sample")))
-            plot_name = f"{safe_key or 'sample'}_tree.png"
-            # _save_tree_plot(
-            #     score_tree,
-            #     title=f"MCTS margins (key={sample.get('key', '')})",
-            #     filename=plot_name,
-            # )
 
         def _path(node):
             path_nodes = []
@@ -1119,15 +1046,14 @@ def main():
                 final_scores=attack_node.scores,
                 success=True,
                 search_mode="mcts",
-                prediction_source=args.prediction_source,
-                reward_source=args.reward_source,
+                evaluations=result["evaluations"],
             )
         if best_node:
             trans_lines = _path_transition_lines(best_node)
             trans_records = _path_transition_records(best_node)
             best_line = (
                 f"Best node margin={best_node.margin:.3f} reward={best_node.scores.get('reward', best_node.margin):.3f} "
-                f"reward_source={best_node.scores.get('reward_source', args.reward_source)} "
+                f"reward_source={best_node.scores.get('reward_source', 'margin')} "
                 f"real_label={truth} pred={best_node.pred} "
                 f"runner_up={best_node.scores.get('runner_up') or '-'} depth={best_node.depth}"
             )
@@ -1161,8 +1087,7 @@ def main():
                 final_scores=best_node.scores,
                 success=False,
                 search_mode="mcts",
-                prediction_source=args.prediction_source,
-                reward_source=args.reward_source,
+                evaluations=result["evaluations"],
             )
         return _build_summary_record(
             sample,
@@ -1174,8 +1099,7 @@ def main():
             final_scores=base_scores,
             success=False,
             search_mode="mcts",
-            prediction_source=args.prediction_source,
-            reward_source=args.reward_source,
+            evaluations=result["evaluations"],
         )
 
     # Attack all candidates, from easiest to hardest
@@ -1226,7 +1150,7 @@ def main():
         complete_marker,
         {
             "completed_at": datetime.now().isoformat(),
-            "total_candidates": int(total_candidates_before_resume),
+            "total_candidates": len(prior_records) + selected_candidate_count,
             "total_records": len(attack_records),
         },
     )

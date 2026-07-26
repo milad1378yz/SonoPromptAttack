@@ -5,7 +5,11 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from attack_core.u2bench import parse_options, resolve_label, split_prompt_options
+from attack_core.u2bench import (
+    fill_prompt_placeholders,
+    normalize_u2bench_row,
+    split_prompt_options,
+)
 
 
 def _find_resume_files(attack_input: Path) -> List[Path]:
@@ -54,7 +58,9 @@ def _parse_textattack_input(text: str) -> Tuple[str, str, str]:
 
 def _textattack_prompt_from_input(text: str) -> str:
     _premise, hypothesis, context = _parse_textattack_input(text)
-    return f"{hypothesis}{context}".strip()
+    if not context:
+        return hypothesis.strip()
+    return f"{hypothesis.rstrip()}\n\n{context.lstrip()}".strip()
 
 
 def _textattack_row_index(text: str) -> Optional[int]:
@@ -387,16 +393,17 @@ def load_attacked_samples(
             continue
 
         row = df.iloc[row_index]
-        options = parse_options(row.get("options", ""))
-        truth = resolve_label(row.get("class_label"), options)
+        normalized_prompt, options, truth = normalize_u2bench_row(row)
         if not options or not truth:
             continue
 
-        original_question = str(
-            rec.get("original_question") or rec.get("base_question") or row.get("prompt", "")
+        original_question = fill_prompt_placeholders(
+            rec.get("original_question") or rec.get("base_question") or normalized_prompt,
+            row,
         )
-        attacked_question = str(
-            rec.get("final_question") or rec.get("attacked_question") or row.get("prompt", "")
+        attacked_question = fill_prompt_placeholders(
+            rec.get("final_question") or rec.get("attacked_question") or normalized_prompt,
+            row,
         )
         label_after_attack = str(
             rec.get("label_after_attack")

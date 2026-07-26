@@ -58,7 +58,7 @@ class _SearchState:
     depth: int = 0
 
 
-class HillClimbingSearch:
+class GeneticSearch:
     """Iteratively accept the best proposed edit until the prediction flips."""
 
     def __init__(
@@ -99,16 +99,10 @@ class HillClimbingSearch:
         max_steps = max(1, int(self.max_steps))
         per_step_max_generations = max(1, int(self.generations_per_step))
         max_attempts = max_steps * max(1, int(self.attempt_multiplier))
-        max_proposer_calls = (
-            self.max_evaluations
-            if self.max_evaluations is not None
-            else max_attempts * per_step_max_generations
-        )
 
         attempts = 0
         accepted_steps = 0
         evaluations = 0
-        proposer_calls = 0
         budget_exhausted = False
         miscls = False
         self.visited_questions.add(question)
@@ -120,10 +114,6 @@ class HillClimbingSearch:
             best_choice = None
             while per_step_generations < per_step_max_generations:
                 per_step_generations += 1
-                proposer_calls += 1
-                if proposer_calls > max_proposer_calls:
-                    budget_exhausted = True
-                    break
                 pairs = self.proposer(question, transitions) or []
                 if not pairs:
                     if attempts >= max_attempts:
@@ -141,7 +131,7 @@ class HillClimbingSearch:
                         scores = self.scorer(mutated_question)
                     except Exception as exc:
                         raise RuntimeError(
-                            "Failed to score hill-climbing candidate "
+                            "Failed to score genetic-search candidate "
                             f"{mutated_question!r} produced by edit {prev!r} -> {new!r}."
                         ) from exc
                     evaluations += 1

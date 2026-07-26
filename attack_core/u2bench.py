@@ -1,5 +1,6 @@
 import ast
 import base64
+import hashlib
 import json
 import re
 from io import BytesIO
@@ -188,6 +189,13 @@ def resolve_row_options_and_truth(row):
     return options, truth
 
 
+def normalize_u2bench_row(row) -> tuple[str, list[str], Optional[str]]:
+    """Return the canonical prompt, option set, and label for one U2-Bench row."""
+    options, truth = resolve_row_options_and_truth(row)
+    prompt = fill_prompt_placeholders(row.get("prompt", ""), row)
+    return prompt, options, truth
+
+
 def resolve_label(class_label, options):
     if class_label is None:
         return None
@@ -291,7 +299,6 @@ def _resolve_cached_tsv_path(
 def load_candidate_samples_from_results_cache(
     dataset_path: str,
     candidate_cache_source: str,
-    prediction_source: str = "pred",
 ):
     dataset_root = Path(dataset_path)
     cache_source = Path(candidate_cache_source)
@@ -357,14 +364,13 @@ def load_candidate_samples_from_results_cache(
                 continue
 
             row = df.iloc[row_index]
-            options, truth = resolve_row_options_and_truth(row)
+            question_text, options, truth = normalize_u2bench_row(row)
             if len(options) < 2:
                 continue
             if not truth:
                 continue
 
             img_b64 = str(row.get("img_data", "")).strip()
-            question_text = fill_prompt_placeholders(row.get("prompt", ""), row)
             if not img_b64 or not question_text:
                 continue
             try:
@@ -427,7 +433,7 @@ def _extract_scores_from_cache(rec, options):
 
     option_tokens = {opt: re.sub(r"[^a-z0-9]+", "", str(opt).strip().lower()) for opt in options}
     tokens = {token: opt for opt, token in option_tokens.items()}
-    if len(tokens) == len(set(tokens)) and all(tok in prefix_scores for tok in tokens):
+    if len(tokens) == len(options) and all(tok in prefix_scores for tok in tokens):
         try:
             return {opt: float(prefix_scores[option_tokens[opt]]) for opt in options}
         except Exception:
@@ -454,27 +460,76 @@ def _load_initial_score_cache(cache_path: Optional[str]):
     cache = {}
     if not cache_path or not Path(cache_path).exists():
         return cache
-    try:
-        with open(cache_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                    key = rec.get("key")
-                    if key:
-                        cache[key] = rec
-                except Exception:
-                    continue
-    except Exception:
-        return {}
+
+    with open(cache_path, "r", encoding="utf-8") as f:
+        for line_number, line in enumerate(f, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"Invalid JSON in score cache {cache_path!r} at line {line_number}."
+                ) from exc
+            if not isinstance(rec, dict):
+                raise ValueError(
+                    f"Invalid score cache record in {cache_path!r} at line {line_number}."
+                )
+            key = rec.get("key")
+            if key:
+                cache[key] = rec
     return cache
 
 
-def _cache_record(key, rel_path, row_index, truth, scores_summary, gap_val):
+def _scoring_cache_fingerprint(
+    vlm,
+    proc,
+    image_data: str,
+    system_prompt: str,
+    question_text: str,
+    options,
+    truth,
+    reasoning_off: bool,
+) -> str:
+    model_config = getattr(vlm, "config", None)
+    tokenizer = getattr(proc, "tokenizer", None)
+    identity = {
+        "contract": "teacher_forced_option_logprob_v1",
+        "model": str(
+            getattr(model_config, "_name_or_path", "")
+            or getattr(vlm, "name_or_path", "")
+            or type(vlm).__qualname__
+        ),
+        "model_revision": str(getattr(model_config, "_commit_hash", "") or ""),
+        "processor": str(
+            getattr(proc, "name_or_path", "")
+            or getattr(tokenizer, "name_or_path", "")
+            or type(proc).__qualname__
+        ),
+        "image_sha256": hashlib.sha256(image_data.encode("utf-8")).hexdigest(),
+        "system_prompt": str(system_prompt or ""),
+        "question": str(question_text),
+        "options": [str(option) for option in options],
+        "truth": str(truth),
+        "reasoning_off": bool(reasoning_off),
+    }
+    payload = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _cache_record(
+    key,
+    rel_path,
+    row_index,
+    truth,
+    scores_summary,
+    gap_val,
+    fingerprint,
+):
     return {
         "key": key,
+        "fingerprint": fingerprint,
         "file": str(rel_path),
         "row": int(row_index),
         "pred": scores_summary.get("pred"),
@@ -497,14 +552,13 @@ def _scores_for_row(
     cached_rec,
     options,
     truth,
-    prediction_source,
-    reward_source,
     reasoning_off,
     vlm,
     proc,
     image,
     system_prompt,
     question_text,
+    cache_fingerprint,
 ):
     from attack_core.vlm_scoring import (
         attach_reward_fields,
@@ -512,20 +566,23 @@ def _scores_for_row(
         summarize_option_scores,
     )
 
-    cached_scores = _extract_scores_from_cache(cached_rec, options) if cached_rec else None
-    cache_complete = bool(
+    trusted_cache = (
         cached_rec
+        if cached_rec and cached_rec.get("fingerprint") == cache_fingerprint
+        else None
+    )
+    cached_scores = _extract_scores_from_cache(trusted_cache, options) if trusted_cache else None
+    cache_complete = bool(
+        trusted_cache
         and cached_scores
-        and isinstance(cached_rec.get("scores"), dict)
-        and bool(cached_rec.get("options"))
+        and isinstance(trusted_cache.get("scores"), dict)
+        and bool(trusted_cache.get("options"))
     )
     scores_summary = None
     if cached_scores:
         try:
             scores_summary = summarize_option_scores(cached_scores, options, truth)
-            scores_summary = attach_reward_fields(
-                scores_summary, truth, prediction_source, reward_source
-            )
+            scores_summary = attach_reward_fields(scores_summary)
         except Exception:
             scores_summary = None
 
@@ -538,34 +595,23 @@ def _scores_for_row(
             question_text,
             options,
             truth,
-            prediction_source=prediction_source,
-            reward_source=reward_source,
             reasoning_off=reasoning_off,
         )
 
     return scores_summary, cache_complete
 
 
-def find_lowconf_correct_samples_dataset_path(
-    u2_path: str,
+def _find_lowconf_correct_samples(
+    tsv_files,
+    dataset_root: Path,
     vlm,
     proc,
-    system_prompt: str = "",
-    diff_threshold: Optional[float] = 5.0,
-    cache_path: Optional[str] = None,
-    prediction_source: str = "pred",
-    reward_source: str = "margin",
-    reasoning_off: bool = False,
-    completed_keys=None,
+    system_prompt,
+    diff_threshold,
+    cache_path,
+    reasoning_off,
+    completed_keys,
 ):
-    task_path = Path(u2_path)
-    if task_path.is_file():
-        dataset_root = task_path.parent
-        tsv_files = [task_path]
-    else:
-        dataset_root = task_path
-        tsv_files = sorted(dataset_root.rglob("*.tsv"))
-
     cache = _load_initial_score_cache(cache_path)
     new_cache_records = []
     candidates = []
@@ -576,21 +622,19 @@ def find_lowconf_correct_samples_dataset_path(
     for tsv in tqdm(tsv_files, desc="Scanning dataset"):
         try:
             df = pd.read_csv(tsv, sep="\t")
-        except Exception:
-            continue
+        except Exception as exc:
+            raise RuntimeError(f"Failed to read dataset file: {tsv}") from exc
         for ridx, row in df.iterrows():
-            options, truth = resolve_row_options_and_truth(row)
-            if len(options) < 2:
-                continue
             rel_path = tsv.relative_to(dataset_root)
             key = f"{rel_path}:{int(ridx)}"
             if key in completed_keys:
                 continue
-            if not truth:
+
+            question_text, options, truth = normalize_u2bench_row(row)
+            if len(options) < 2 or not truth:
                 continue
 
             img_b64 = str(row.get("img_data", "")).strip()
-            question_text = fill_prompt_placeholders(row.get("prompt", ""), row)
             if not img_b64 or not question_text:
                 continue
 
@@ -600,27 +644,44 @@ def find_lowconf_correct_samples_dataset_path(
                 continue
 
             cached_rec = cache.get(key)
+            fingerprint = _scoring_cache_fingerprint(
+                vlm,
+                proc,
+                img_b64,
+                system_prompt,
+                question_text,
+                options,
+                truth,
+                reasoning_off,
+            )
             try:
                 scores_summary, cache_complete = _scores_for_row(
                     cached_rec,
                     options,
                     truth,
-                    prediction_source,
-                    reward_source,
                     reasoning_off,
                     vlm,
                     proc,
                     img,
                     system_prompt,
                     question_text,
+                    fingerprint,
                 )
-            except Exception:
-                continue
+            except Exception as exc:
+                raise RuntimeError(f"Failed to score dataset sample {key!r}.") from exc
 
             gap_val = float(scores_summary.get("pred_gap", scores_summary.get("gap", 0.0)))
             if cache_path and (cached_rec is None or not cache_complete):
                 new_cache_records.append(
-                    _cache_record(key, rel_path, ridx, truth, scores_summary, gap_val)
+                    _cache_record(
+                        key,
+                        rel_path,
+                        ridx,
+                        truth,
+                        scores_summary,
+                        gap_val,
+                        fingerprint,
+                    )
                 )
 
             pred = str(scores_summary.get("pred") or "")
@@ -644,11 +705,39 @@ def find_lowconf_correct_samples_dataset_path(
 
     candidates.sort(key=lambda x: x["gap"])
     if cache_path and new_cache_records:
-        try:
-            append_jsonl_records(Path(cache_path), new_cache_records)
-        except Exception:
-            pass
+        append_jsonl_records(Path(cache_path), new_cache_records)
     return candidates
+
+
+def find_lowconf_correct_samples_dataset_path(
+    u2_path: str,
+    vlm,
+    proc,
+    system_prompt: str = "",
+    diff_threshold: Optional[float] = 5.0,
+    cache_path: Optional[str] = None,
+    reasoning_off: bool = False,
+    completed_keys=None,
+):
+    task_path = Path(u2_path)
+    if task_path.is_file():
+        dataset_root = task_path.parent
+        tsv_files = [task_path]
+    else:
+        dataset_root = task_path
+        tsv_files = sorted(dataset_root.rglob("*.tsv"))
+
+    return _find_lowconf_correct_samples(
+        tsv_files,
+        dataset_root,
+        vlm,
+        proc,
+        system_prompt,
+        diff_threshold,
+        cache_path,
+        reasoning_off,
+        completed_keys,
+    )
 
 
 def find_lowconf_correct_samples_dataset_id(
@@ -658,89 +747,20 @@ def find_lowconf_correct_samples_dataset_id(
     system_prompt: str = "",
     diff_threshold: Optional[float] = 5.0,
     cache_path: Optional[str] = None,
-    prediction_source: str = "pred",
-    reward_source: str = "margin",
     reasoning_off: bool = False,
+    completed_keys=None,
 ):
     task_dir = Path(u2_path)
-    cache = _load_initial_score_cache(cache_path)
-    new_cache_records = []
-    candidates = []
     disease_dir = task_dir / "disease_diagnosis"
     tsv_files = sorted(disease_dir.rglob("*.tsv")) if disease_dir.exists() else []
-    print("tsv_files:", tsv_files)
-
-    for tsv in tqdm(tsv_files, desc="Scanning dataset"):
-        try:
-            df = pd.read_csv(tsv, sep="\t")
-        except Exception:
-            continue
-        for ridx, row in df.iterrows():
-            options, truth = resolve_row_options_and_truth(row)
-            if len(options) < 2 or not truth:
-                continue
-
-            img_b64 = str(row.get("img_data", "")).strip()
-            question_text = fill_prompt_placeholders(row.get("prompt", ""), row)
-            if not img_b64 or not question_text:
-                continue
-
-            try:
-                img = decode_base64_image(img_b64)
-            except Exception:
-                continue
-
-            key = f"{tsv.relative_to(task_dir)}:{int(ridx)}"
-            cached_rec = cache.get(key)
-            try:
-                scores_summary, cache_complete = _scores_for_row(
-                    cached_rec,
-                    options,
-                    truth,
-                    prediction_source,
-                    reward_source,
-                    reasoning_off,
-                    vlm,
-                    proc,
-                    img,
-                    system_prompt,
-                    question_text,
-                )
-            except Exception:
-                continue
-
-            gap_val = float(scores_summary.get("pred_gap", scores_summary.get("gap", 0.0)))
-            if cache_path and (cached_rec is None or not cache_complete):
-                new_cache_records.append(
-                    _cache_record(
-                        key, tsv.relative_to(task_dir), ridx, truth, scores_summary, gap_val
-                    )
-                )
-
-            pred = str(scores_summary.get("pred") or "")
-            if not pred or truth is None or pred.lower() != truth.lower():
-                continue
-
-            if diff_threshold is None or gap_val < float(diff_threshold):
-                candidates.append(
-                    {
-                        "image": img,
-                        "ground_truth": truth,
-                        "prompt": question_text,
-                        "options": options,
-                        "gap": gap_val,
-                        "key": key,
-                        "source_file": str(tsv.relative_to(task_dir)),
-                        "row_index": int(ridx),
-                        "scores_summary": scores_summary,
-                    }
-                )
-
-    if cache_path and new_cache_records:
-        try:
-            append_jsonl_records(Path(cache_path), new_cache_records)
-        except Exception:
-            pass
-
-    candidates.sort(key=lambda x: x["gap"])
-    return candidates
+    return _find_lowconf_correct_samples(
+        tsv_files,
+        task_dir,
+        vlm,
+        proc,
+        system_prompt,
+        diff_threshold,
+        cache_path,
+        reasoning_off,
+        completed_keys,
+    )

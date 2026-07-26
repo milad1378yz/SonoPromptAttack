@@ -29,9 +29,18 @@ def _resolve_local_files_only():
     return raw in {"1", "true", "yes", "on"}
 
 
+def _inference_dtype(*, use_cuda: bool):
+    if not use_cuda:
+        return torch.float32
+    if torch.cuda.is_bf16_supported():
+        return torch.bfloat16
+    return torch.float16
+
+
 def load_vlm(model_id: str):
-    dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float16
     device_map = _resolve_vlm_device_map()
+    targets_cpu = isinstance(device_map, dict) and device_map.get("") == "cpu"
+    dtype = _inference_dtype(use_cuda=torch.cuda.is_available() and not targets_cpu)
     local_files_only = _resolve_local_files_only()
 
     # Use HF_HOME as a cache location, not as an implicit offline-mode switch.
@@ -69,7 +78,7 @@ def load_vlm(model_id: str):
         )
     # Show the model devices in short form (only the devices used and not the layers on them (a list))
     model_devices = set()
-    for name, param in model.named_parameters():
+    for _, param in model.named_parameters():
         model_devices.add(str(param.device))
     model_devices = ", ".join(sorted(model_devices))
     print(f"Loaded VLM model '{model_id}' on devices: {model_devices} (device_map={device_map})")
@@ -88,8 +97,9 @@ def _should_use_4bit(model_id: str, quantization: str) -> bool:
 
 
 def _load_llm_4bit(model_id: str, dtype):
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    if not torch.cuda.is_available():
+        raise RuntimeError("4-bit LLM loading requires a CUDA-capable GPU.")
+    torch.cuda.empty_cache()
     bnb_conf = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=dtype,
@@ -111,7 +121,7 @@ def _load_llm_4bit(model_id: str, dtype):
 
 
 def load_llm(model_id: str, quantization: str = "auto"):
-    dtype = torch.float16
+    dtype = _inference_dtype(use_cuda=torch.cuda.is_available())
     tok = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     common_kwargs = {
         "torch_dtype": dtype,
@@ -133,13 +143,10 @@ def load_llm(model_id: str, quantization: str = "auto"):
                 "Use --llm-quantization 4bit to avoid this fallback."
             )
             mdl = _load_llm_4bit(model_id, dtype)
-        except Exception as exc:
-            print(f"LLM standard load failed ({exc}); retrying with 4-bit quantization.")
-            mdl = _load_llm_4bit(model_id, dtype)
 
     # Show the model devices in short form (only the devices used and not the layers on them (a list))
     model_devices = set()
-    for name, param in mdl.named_parameters():
+    for _, param in mdl.named_parameters():
         model_devices.add(str(param.device))
     model_devices = ", ".join(sorted(model_devices))
     print(f"Loaded LLM model '{model_id}' on devices: {model_devices}")

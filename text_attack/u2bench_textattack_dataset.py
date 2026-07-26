@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import textattack
 
-from attack_core.u2bench import parse_first_option_group, split_prompt_options
+from attack_core.u2bench import normalize_u2bench_row, split_prompt_options
 from text_attack.medgemma_attack_common import image_placeholder
 
 
@@ -17,19 +17,30 @@ def _textattack_tsv_path() -> Path:
 
 def _load_dataset(tsv_path: Path):
     df = pd.read_csv(tsv_path, sep="\t")
-    label_names = parse_first_option_group(df.iloc[0]["options"])
+    if df.empty:
+        raise ValueError(f"TextAttack TSV is empty: {tsv_path}")
+
+    _, label_names, _ = normalize_u2bench_row(df.iloc[0])
+    label_names = [str(option).strip() for option in label_names if str(option).strip()]
+    if not label_names:
+        raise ValueError(f"First TSV row has no usable options: {tsv_path}")
+
     label_map = {name: idx for idx, name in enumerate(label_names)}
     rows = []
 
     # premise = image placeholder keyed by TSV row index (resolved in medgemma_textattack_wrapper)
     for tsv_row_index, row in df.iterrows():
-        if str(row["class_label"]) not in label_map:
+        prompt, options, truth = normalize_u2bench_row(row)
+        normalized_options = [
+            str(option).strip() for option in options if str(option).strip()
+        ]
+        if normalized_options != label_names or truth not in label_map:
             continue
-        editable, suffix = split_prompt_options(row["prompt"])
+        editable, suffix = split_prompt_options(prompt)
         rows.append(
             (
                 (image_placeholder(tsv_row_index), editable, suffix),
-                label_map[str(row["class_label"])],
+                label_map[truth],
             )
         )
 

@@ -19,25 +19,14 @@ from textattack.transformations import (
 from text_attack.medgemma_attack_common import (
     VLM_FROZEN_COLUMNS,
     VLM_INPUT_COLUMNS,
+    force_tensorflow_cpu,
     maybe_set_seed,
 )
 
 
-def _force_tensorflow_cpu():
-    try:
-        import tensorflow as tf
-
-        try:
-            tf.config.set_visible_devices([], "GPU")
-        except Exception:
-            pass
-    except Exception:
-        pass
-
-
 def attack(model_wrapper):
     maybe_set_seed()
-    _force_tensorflow_cpu()
+    force_tensorflow_cpu()
     transformation = CompositeTransformation(
         [
             WordSwapRandomCharacterInsertion(

@@ -143,10 +143,10 @@ def format_option_scores(score_map):
     return " ".join(f"{k}={v:.3f}" for k, v in ordered)
 
 
-def attach_reward_fields(scores_summary, truth_label, prediction_source: str, reward_source: str):
+def attach_reward_fields(scores_summary):
     scores_summary = dict(scores_summary)
-    scores_summary["reward_source"] = reward_source
-    scores_summary["prediction_source"] = prediction_source
+    scores_summary["reward_source"] = "margin"
+    scores_summary["prediction_source"] = "pred"
     scores_summary["chosen_pred"] = str(scores_summary.get("pred") or "")
     scores_summary["reward"] = float(scores_summary.get("margin", 0.0))
     return scores_summary
@@ -161,8 +161,6 @@ def compute_scores(
     options,
     truth_label,
     *,
-    prediction_source: str = "pred",
-    reward_source: str = "margin",
     reasoning_off: bool = False,
 ):
     option_texts = [str(o).strip() for o in options if str(o).strip()]
@@ -186,9 +184,4 @@ def compute_scores(
         option_texts,
         truth_label,
     )
-    return attach_reward_fields(
-        summary,
-        truth_label,
-        prediction_source=prediction_source,
-        reward_source=reward_source,
-    )
+    return attach_reward_fields(summary)
