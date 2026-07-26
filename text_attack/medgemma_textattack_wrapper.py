@@ -1,12 +1,7 @@
-from __future__ import annotations
-
-import argparse
-import ast
-import json
 import multiprocessing as mp
 import os
 import sys
-import types
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -15,36 +10,71 @@ import numpy as np
 import torch
 import textattack
 
-THIS_DIR = Path(__file__).resolve().parent
-ATTACK_VLM_DIR = THIS_DIR.parent
-if str(THIS_DIR) not in sys.path:
-    sys.path.insert(0, str(THIS_DIR))
-if str(ATTACK_VLM_DIR) not in sys.path:
-    sys.path.insert(0, str(ATTACK_VLM_DIR))
-
-from medgemma_attack_common import (  # noqa: E402
+from attack_core.model_loader import load_vlm
+from attack_core.u2bench import decode_base64_image, parse_options
+from attack_core.vlm_scoring import score_candidate
+from text_attack.medgemma_attack_common import (
     IMAGE_TSV_ROW_PREFIX,
     compose_transfer_prompt,
     maybe_set_seed,
+    register_for_parallel_pickling,
 )
 
-from attack_core.model_loader import load_vlm  # noqa: E402
-from attack_core.u2bench import decode_base64_image  # noqa: E402
-from attack_core.vlm_scoring import score_candidate  # noqa: E402
-
 try:
-    from attack_core.vlm_scoring import score_options_from_generation_step  # noqa: E402
+    from attack_core.vlm_scoring import score_options_from_generation_step
 except ImportError:
     score_options_from_generation_step = None
 
 
-_TSV_ENV = os.getenv("MEDGEMMA_TEXTATTACK_TSV", "").strip()
-if not _TSV_ENV:
-    raise ValueError("MEDGEMMA_TEXTATTACK_TSV is required.")
-TSV_PATH = Path(_TSV_ENV)
-MODEL_ID = os.getenv("MEDGEMMA_TEXTATTACK_MODEL_ID", "google/medgemma-4b-it")
-SYSTEM_PROMPT = os.getenv("MEDGEMMA_TEXTATTACK_SYSTEM_PROMPT", "")
-SCORE_MODE = os.getenv("MEDGEMMA_TEXTATTACK_SCORE_MODE", "teacher_forced").strip().lower()
+@dataclass(frozen=True)
+class TextAttackSettings:
+    tsv_path: Path
+    model_id: str
+    system_prompt: str
+    score_mode: str
+
+    @classmethod
+    def from_environment(
+        cls,
+        *,
+        tsv_path: str | Path | None = None,
+        model_id: str | None = None,
+        system_prompt: str | None = None,
+        score_mode: str | None = None,
+    ) -> "TextAttackSettings":
+        raw_tsv_path = (
+            str(tsv_path) if tsv_path is not None else os.getenv("MEDGEMMA_TEXTATTACK_TSV", "")
+        ).strip()
+        if not raw_tsv_path:
+            raise ValueError("MEDGEMMA_TEXTATTACK_TSV is required.")
+
+        resolved_model_id = (
+            model_id
+            if model_id is not None
+            else os.getenv("MEDGEMMA_TEXTATTACK_MODEL_ID", "google/medgemma-4b-it")
+        ).strip()
+        resolved_system_prompt = (
+            system_prompt
+            if system_prompt is not None
+            else os.getenv("MEDGEMMA_TEXTATTACK_SYSTEM_PROMPT", "")
+        )
+        resolved_score_mode = (
+            score_mode
+            if score_mode is not None
+            else os.getenv("MEDGEMMA_TEXTATTACK_SCORE_MODE", "teacher_forced")
+        ).strip().lower()
+        if resolved_score_mode not in {"teacher_forced", "generation_step"}:
+            raise ValueError(
+                "MEDGEMMA_TEXTATTACK_SCORE_MODE must be "
+                "'teacher_forced' or 'generation_step'."
+            )
+
+        return cls(
+            tsv_path=Path(raw_tsv_path).expanduser(),
+            model_id=resolved_model_id,
+            system_prompt=resolved_system_prompt,
+            score_mode=resolved_score_mode,
+        )
 
 
 def _textattack_parallel_enabled() -> bool:
@@ -84,16 +114,7 @@ def _load_options(tsv_path: Path) -> list[str]:
     import pandas as pd
 
     df = pd.read_csv(tsv_path, sep="\t")
-    options_field = str(df.iloc[0]["options"]).strip()
-    try:
-        parsed = json.loads(options_field)
-    except Exception:
-        parsed = ast.literal_eval(options_field)
-    if isinstance(parsed, dict):
-        values = next(iter(parsed.values()))
-    else:
-        values = parsed
-    return [str(x).strip() for x in values if str(x).strip()]
+    return [option.strip() for option in parse_options(df.iloc[0]["options"]) if option.strip()]
 
 
 @lru_cache(maxsize=256)
@@ -102,16 +123,19 @@ def _decode_image_cached(img_b64: str):
 
 
 class MedGemmaTextAttackWrapper(textattack.models.wrappers.ModelWrapper):
-    def __init__(self, model_id: str = MODEL_ID, tsv_path: Path = TSV_PATH):
-        self.model_id = model_id
-        self.tsv_path = Path(tsv_path)
+    def __init__(self, settings: TextAttackSettings | None = None):
+        settings = settings or TextAttackSettings.from_environment()
+        self.settings = settings
+        self.model_id = settings.model_id
+        self.tsv_path = settings.tsv_path
+        self.system_prompt = settings.system_prompt
+        self.score_mode = settings.score_mode
         self.options = _load_options(self.tsv_path)
         self._image_b64_by_tsv_row = _load_image_b64_by_tsv_row(self.tsv_path, self.options)
         _ensure_vlm_device_map()
-        self.vlm, self.processor = load_vlm(model_id)
+        self.vlm, self.processor = load_vlm(self.model_id)
         self.model = self.vlm
         self.tokenizer = getattr(self.processor, "tokenizer", None)
-        self.score_mode = SCORE_MODE
 
     def _resolve_image_b64(self, premise: str) -> str:
         if premise.startswith(IMAGE_TSV_ROW_PREFIX) and premise.endswith("__"):
@@ -159,7 +183,7 @@ class MedGemmaTextAttackWrapper(textattack.models.wrappers.ModelWrapper):
                 self.vlm,
                 self.processor,
                 image,
-                SYSTEM_PROMPT,
+                self.system_prompt,
                 question_text,
                 self.options,
             )
@@ -172,7 +196,7 @@ class MedGemmaTextAttackWrapper(textattack.models.wrappers.ModelWrapper):
                         self.vlm,
                         self.processor,
                         image,
-                        SYSTEM_PROMPT,
+                        self.system_prompt,
                         question_text,
                         opt,
                     )
@@ -211,15 +235,15 @@ class MedGemmaTextAttackWrapper(textattack.models.wrappers.ModelWrapper):
 # TextAttack loads --model-from-file under a temp_* module name, which breaks
 # multiprocessing pickling when --parallel is enabled. Re-register this file
 # under a stable import path so worker processes can unpickle the wrapper.
-WRAPPER_MODULE = "medgemma_textattack_wrapper"
-MedGemmaTextAttackWrapper.__module__ = WRAPPER_MODULE
-MedGemmaTextAttackWrapper.__qualname__ = "MedGemmaTextAttackWrapper"
-if WRAPPER_MODULE not in sys.modules:
-    _stable_module = types.ModuleType(WRAPPER_MODULE)
-    _stable_module.__file__ = str(Path(__file__).resolve())
-    sys.modules[WRAPPER_MODULE] = _stable_module
-_stable_module = sys.modules[WRAPPER_MODULE]
-_stable_module.MedGemmaTextAttackWrapper = MedGemmaTextAttackWrapper
+_STABLE_MODULE = "text_attack.medgemma_textattack_wrapper"
+register_for_parallel_pickling(
+    _STABLE_MODULE,
+    Path(__file__),
+    {
+        "TextAttackSettings": TextAttackSettings,
+        "MedGemmaTextAttackWrapper": MedGemmaTextAttackWrapper,
+    },
+)
 
 # Workers unpickle the attack object; loading another VLM at import time duplicates GPU memory.
 if _is_main_process():
@@ -227,45 +251,4 @@ if _is_main_process():
     model = MedGemmaTextAttackWrapper()
 else:
     model = None
-_stable_module.model = model
-
-
-def _parse_args():
-    parser = argparse.ArgumentParser(description="MedGemma TextAttack wrapper CLI")
-    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility.")
-    parser.add_argument("--tsv", type=str, default=None, help="Path to TSV dataset.")
-    parser.add_argument("--model-id", type=str, default=None, help="Hugging Face model id.")
-    parser.add_argument("--system-prompt", type=str, default=None, help="Optional system prompt.")
-    parser.add_argument(
-        "--score-mode",
-        type=str,
-        choices=["teacher_forced", "generation_step"],
-        default=None,
-        help="Scoring mode.",
-    )
-    return parser.parse_args()
-
-
-def main():
-    args = _parse_args()
-    if args.seed is not None:
-        os.environ["MEDGEMMA_TEXTATTACK_SEED"] = str(args.seed)
-    if args.tsv:
-        os.environ["MEDGEMMA_TEXTATTACK_TSV"] = args.tsv
-    if args.model_id:
-        os.environ["MEDGEMMA_TEXTATTACK_MODEL_ID"] = args.model_id
-    if args.system_prompt is not None:
-        os.environ["MEDGEMMA_TEXTATTACK_SYSTEM_PROMPT"] = args.system_prompt
-    if args.score_mode:
-        os.environ["MEDGEMMA_TEXTATTACK_SCORE_MODE"] = args.score_mode
-
-    maybe_set_seed()
-    wrapper = MedGemmaTextAttackWrapper()
-    print(
-        "MedGemma TextAttack wrapper initialized. "
-        f"model_id={wrapper.model_id} tsv_path={wrapper.tsv_path} score_mode={wrapper.score_mode}"
-    )
-
-
-if __name__ == "__main__":
-    main()
+sys.modules[_STABLE_MODULE].model = model
