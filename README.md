@@ -1,4 +1,12 @@
-# When Minor Edits Matter
+<div align="center">
+  <h1>When Minor Edits Matter</h1>
+  <p><strong>LLM-Driven Prompt Attack for Medical VLM Robustness in Ultrasound</strong></p>
+  <p>
+    <a href="https://arxiv.org/abs/2603.21047"><img src="https://img.shields.io/badge/arXiv-2603.21047-b31b1b.svg" alt="arXiv"></a>
+    <img src="https://img.shields.io/badge/Python-3.10-3776AB.svg?logo=python&logoColor=white" alt="Python 3.10">
+    <img src="https://img.shields.io/badge/PyTorch-2.7-EE4C2C.svg?logo=pytorch&logoColor=white" alt="PyTorch 2.7">
+  </p>
+</div>
 
 Official implementation of
 [When Minor Edits Matter: LLM-Driven Prompt Attack for Medical VLM Robustness in Ultrasound](https://arxiv.org/abs/2603.21047).
