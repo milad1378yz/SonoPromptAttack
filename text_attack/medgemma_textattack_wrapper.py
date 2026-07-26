@@ -89,7 +89,10 @@ def _load_tsv_metadata(tsv_path: Path) -> tuple[list[str], dict[int, str]]:
     if df.empty:
         raise ValueError(f"TextAttack TSV is empty: {tsv_path}")
 
-    _, label_names, _ = normalize_u2bench_row(df.iloc[0])
+    _, label_names, _ = normalize_u2bench_row(
+        df.iloc[0],
+        first_option_group=True,
+    )
     label_names = [str(option).strip() for option in label_names if str(option).strip()]
     if not label_names:
         raise ValueError(f"First TSV row has no usable options: {tsv_path}")
@@ -97,7 +100,10 @@ def _load_tsv_metadata(tsv_path: Path) -> tuple[list[str], dict[int, str]]:
     label_map = {name: idx for idx, name in enumerate(label_names)}
     images: dict[int, str] = {}
     for tsv_row_index, row in df.iterrows():
-        _, options, truth = normalize_u2bench_row(row)
+        _, options, truth = normalize_u2bench_row(
+            row,
+            first_option_group=True,
+        )
         normalized_options = [
             str(option).strip() for option in options if str(option).strip()
         ]

@@ -189,9 +189,21 @@ def resolve_row_options_and_truth(row):
     return options, truth
 
 
-def normalize_u2bench_row(row) -> tuple[str, list[str], Optional[str]]:
-    """Return the canonical prompt, option set, and label for one U2-Bench row."""
-    options, truth = resolve_row_options_and_truth(row)
+def normalize_u2bench_row(
+    row,
+    *,
+    first_option_group: bool = False,
+) -> tuple[str, list[str], Optional[str]]:
+    """Return the canonical prompt, option set, and label for one U2-Bench row.
+
+    TextAttack uses the first option group because one attack dataset must have
+    a single, stable label space.
+    """
+    if first_option_group and not _is_location_prompt(row.get("prompt", "")):
+        options = parse_first_option_group(row.get("options", ""))
+        truth = resolve_label(row.get("class_label", ""), options)
+    else:
+        options, truth = resolve_row_options_and_truth(row)
     prompt = fill_prompt_placeholders(row.get("prompt", ""), row)
     return prompt, options, truth
 
@@ -329,6 +341,9 @@ def load_candidate_samples_from_results_cache(
             key = str(rec.get("key") or "").strip()
             if not key or key in seen_keys:
                 continue
+            cached_prediction_source = str(rec.get("prediction_source") or "").strip()
+            if cached_prediction_source not in {"", "pred"}:
+                continue
             seen_keys.add(key)
 
             try:
@@ -462,13 +477,22 @@ def _load_initial_score_cache(cache_path: Optional[str]):
         return cache
 
     with open(cache_path, "r", encoding="utf-8") as f:
-        for line_number, line in enumerate(f, start=1):
-            line = line.strip()
+        lines = f.readlines()
+        truncated_final_record = False
+        for line_number, raw_line in enumerate(lines, start=1):
+            line = raw_line.strip()
             if not line:
                 continue
             try:
                 rec = json.loads(line)
             except json.JSONDecodeError as exc:
+                if line_number == len(lines) and not raw_line.endswith("\n"):
+                    print(
+                        f"Warning: ignoring truncated final score-cache record "
+                        f"in {cache_path!r}."
+                    )
+                    truncated_final_record = True
+                    continue
                 raise ValueError(
                     f"Invalid JSON in score cache {cache_path!r} at line {line_number}."
                 ) from exc
@@ -479,6 +503,9 @@ def _load_initial_score_cache(cache_path: Optional[str]):
             key = rec.get("key")
             if key:
                 cache[key] = rec
+    if truncated_final_record:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            f.writelines(lines[:-1])
     return cache
 
 

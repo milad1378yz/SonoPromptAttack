@@ -121,7 +121,11 @@ def _load_llm_4bit(model_id: str, dtype):
 
 
 def load_llm(model_id: str, quantization: str = "auto"):
-    dtype = _inference_dtype(use_cuda=torch.cuda.is_available())
+    dtype = (
+        torch.float16
+        if quantization == "fp16"
+        else _inference_dtype(use_cuda=torch.cuda.is_available())
+    )
     tok = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
     common_kwargs = {
         "torch_dtype": dtype,

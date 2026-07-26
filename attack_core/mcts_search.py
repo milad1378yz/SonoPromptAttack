@@ -142,6 +142,10 @@ class MCTS:
     def _expand(self, node: MCTSNode, evaluation_budget: int) -> List[MCTSNode]:
         transitions = self._path_transitions(node)
         pairs = self.proposer(node.question, transitions) or []
+        child_budget = min(
+            max(0, self.max_children - len(node.children)),
+            max(0, evaluation_budget),
+        )
         # Avoid retrying the same edit pairs for a node.
         existing_pairs = {
             (str(ch.transition[0]).lower(), str(ch.transition[1]).lower())
@@ -150,7 +154,7 @@ class MCTS:
         }
         children = []
         for prev, new in pairs:
-            if len(children) >= min(self.max_children, evaluation_budget):
+            if len(children) >= child_budget:
                 break
             mutated = self.apply_edit(node.question, prev, new)
             if mutated == node.question:

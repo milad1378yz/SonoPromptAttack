@@ -20,7 +20,10 @@ def _load_dataset(tsv_path: Path):
     if df.empty:
         raise ValueError(f"TextAttack TSV is empty: {tsv_path}")
 
-    _, label_names, _ = normalize_u2bench_row(df.iloc[0])
+    _, label_names, _ = normalize_u2bench_row(
+        df.iloc[0],
+        first_option_group=True,
+    )
     label_names = [str(option).strip() for option in label_names if str(option).strip()]
     if not label_names:
         raise ValueError(f"First TSV row has no usable options: {tsv_path}")
@@ -30,7 +33,10 @@ def _load_dataset(tsv_path: Path):
 
     # premise = image placeholder keyed by TSV row index (resolved in medgemma_textattack_wrapper)
     for tsv_row_index, row in df.iterrows():
-        prompt, options, truth = normalize_u2bench_row(row)
+        prompt, options, truth = normalize_u2bench_row(
+            row,
+            first_option_group=True,
+        )
         normalized_options = [
             str(option).strip() for option in options if str(option).strip()
         ]

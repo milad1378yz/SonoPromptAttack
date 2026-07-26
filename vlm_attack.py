@@ -74,47 +74,38 @@ def _load_resume_records(progress_path: Path):
     if not progress_path.exists():
         return records, seen_keys
 
-    try:
-        with open(progress_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
+    with open(progress_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+        truncated_final_record = False
+        for line_number, raw_line in enumerate(lines, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError as exc:
+                if line_number == len(lines) and not raw_line.endswith("\n"):
+                    print(
+                        f"Warning: ignoring truncated final resume record in {progress_path}."
+                    )
+                    truncated_final_record = True
                     continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                key = str(rec.get("key") or "")
-                if not key or key in seen_keys:
-                    continue
-                records.append(rec)
-                seen_keys.add(key)
-    except Exception:
-        return [], set()
+                raise ValueError(
+                    f"Invalid JSON in resume file {progress_path} at line {line_number}."
+                ) from exc
+            if not isinstance(rec, dict):
+                raise ValueError(
+                    f"Invalid resume record in {progress_path} at line {line_number}."
+                )
+            key = str(rec.get("key") or "")
+            if not key or key in seen_keys:
+                continue
+            records.append(rec)
+            seen_keys.add(key)
+    if truncated_final_record:
+        with open(progress_path, "w", encoding="utf-8") as f:
+            f.writelines(lines[:-1])
     return records, seen_keys
-
-
-def _load_completed_keys_from_tree_log(tree_log_path: Path):
-    completed_keys = set()
-    if not tree_log_path or not tree_log_path.exists():
-        return completed_keys
-
-    try:
-        with open(tree_log_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                key = str(rec.get("key") or "")
-                if key:
-                    completed_keys.add(key)
-    except Exception:
-        return set()
-    return completed_keys
 
 
 def _build_summary_record(
@@ -129,6 +120,8 @@ def _build_summary_record(
     success,
     search_mode,
     evaluations,
+    skipped=False,
+    skip_reason="",
 ):
     source_file, row_index = _sample_source_info(sample)
     final_scores = final_scores or {}
@@ -142,6 +135,8 @@ def _build_summary_record(
         "evaluations": int(evaluations),
         "success": bool(success),
         "attack_success": bool(success),
+        "skipped": bool(skipped),
+        "skip_reason": str(skip_reason),
         "prediction_source": "pred",
         "reward_source": "margin",
         "real_label": truth,
@@ -198,6 +193,8 @@ def _export_attack_summaries(records, summary_dir: Path, summary_format: str):
                 "evaluations",
                 "success",
                 "attack_success",
+                "skipped",
+                "skip_reason",
                 "prediction_source",
                 "reward_source",
                 "real_label",
@@ -440,16 +437,60 @@ def main():
         )
         return
 
-    prior_records, completed_keys = _load_resume_records(progress_path)
-    if not completed_keys:
-        completed_keys = _load_completed_keys_from_tree_log(tree_log_path)
-        if completed_keys:
-            tree_resume_msg = (
-                f"Resume fallback: found {len(completed_keys)} completed sample key(s) "
-                f"in tree log {tree_log_path}."
+    run_config_path = summary_dir / "_run_config.json"
+    run_config = {
+        "schema_version": 1,
+        "scoring_contract": "teacher_forced_option_logprob_v1",
+        "dataset": str(Path(u2_path).expanduser().resolve()),
+        "candidate_cache_source": (
+            str(Path(args.candidate_cache_source).expanduser().resolve())
+            if args.candidate_cache_source
+            else ""
+        ),
+        "vlm_id": vlm_id,
+        "llm_id": llm_id,
+        "use_api": bool(args.use_api),
+        "llm_api_provider": args.llm_api_provider,
+        "llm_api_base_url": args.llm_api_base_url or "",
+        "llm_quantization": args.llm_quantization,
+        "system_prompt": args.system_prompt,
+        "reasoning_off": bool(args.reasoning_off),
+        "search_mode": args.search_mode,
+        "seed": args.seed,
+        "gap_threshold": args.gap_threshold,
+        "max_vlm_evaluations": args.max_vlm_evaluations,
+        "mcts_max_depth": args.mcts_max_depth,
+        "mcts_exploration": args.mcts_exploration,
+        "mcts_max_children": args.mcts_max_children,
+        "ga_max_steps": args.ga_max_steps,
+        "ga_generations_per_step": args.ga_generations_per_step,
+        "ga_attempt_multiplier": args.ga_attempt_multiplier,
+        "proposal_attempts": args.proposal_attempts,
+    }
+    if run_config_path.exists():
+        with open(run_config_path, "r", encoding="utf-8") as f:
+            saved_run_config = json.load(f)
+        if not isinstance(saved_run_config, dict):
+            raise ValueError(f"Invalid run configuration file: {run_config_path}")
+        if saved_run_config != run_config:
+            changed = sorted(
+                key
+                for key in set(saved_run_config) | set(run_config)
+                if saved_run_config.get(key) != run_config.get(key)
             )
-            print(tree_resume_msg)
-            append_text(log_path, tree_resume_msg)
+            raise ValueError(
+                "Cannot resume with a different run configuration. "
+                f"Changed fields: {', '.join(changed)}. Use a new --summary-dir."
+            )
+    elif progress_path.exists():
+        raise ValueError(
+            f"Cannot safely resume legacy progress without {run_config_path}. "
+            "Use a new --summary-dir."
+        )
+    else:
+        write_json(run_config_path, run_config)
+
+    prior_records, completed_keys = _load_resume_records(progress_path)
 
     gap_threshold = args.gap_threshold
     print(
@@ -589,6 +630,29 @@ def main():
         else:
             base_scores = dict(base_scores)
         base_scores = attach_reward_fields(base_scores)
+        base_pred = str(base_scores.get("pred") or "").strip()
+        if not base_pred or base_pred.lower() != str(truth).lower():
+            skip_reason = (
+                "Current baseline prediction is not the ground-truth label; "
+                "the cached candidate is no longer eligible."
+            )
+            skip_line = f"Skipping {sample.get('key', '')}: {skip_reason}"
+            print(skip_line)
+            append_text(log_path, skip_line)
+            return _build_summary_record(
+                sample,
+                truth=truth,
+                base_question=base_question,
+                final_question=base_question,
+                transitions=[],
+                base_scores=base_scores,
+                final_scores=base_scores,
+                success=False,
+                search_mode=args.search_mode,
+                evaluations=0,
+                skipped=True,
+                skip_reason=skip_reason,
+            )
         initial_gap = sample.get("gap")
         if initial_gap is None:
             initial_gap = base_scores.get("pred_gap", base_scores.get("gap", float("nan")))
@@ -1122,7 +1186,9 @@ def main():
                 record["elapsed_seconds"] = round(time.monotonic() - sample_started, 3)
                 attack_records.append(record)
                 append_jsonl(progress_path, record)
-                if success_count == prev_success_count:
+                if record.get("skipped"):
+                    skipped_count += 1
+                elif success_count == prev_success_count:
                     failed_count += 1
 
             processed = success_count + failed_count + skipped_count
@@ -1146,16 +1212,24 @@ def main():
     if written_paths:
         print(f"Per-TSV attack summaries written under: {summary_dir}")
         append_text(log_path, f"Per-TSV attack summaries written under: {summary_dir}")
-    write_json(
-        complete_marker,
-        {
-            "completed_at": datetime.now().isoformat(),
-            "total_candidates": len(prior_records) + selected_candidate_count,
-            "total_records": len(attack_records),
-        },
-    )
-    print(f"Complete marker written: {complete_marker}")
-    append_text(log_path, f"Complete marker written: {complete_marker}")
+    if selected_candidate_count == remaining_candidates:
+        write_json(
+            complete_marker,
+            {
+                "completed_at": datetime.now().isoformat(),
+                "total_candidates": len(prior_records) + selected_candidate_count,
+                "total_records": len(attack_records),
+            },
+        )
+        print(f"Complete marker written: {complete_marker}")
+        append_text(log_path, f"Complete marker written: {complete_marker}")
+    else:
+        partial_msg = (
+            f"Partial batch complete: {remaining_candidates - selected_candidate_count} "
+            "candidate(s) remain. Re-run with the same summary directory to resume."
+        )
+        print(partial_msg)
+        append_text(log_path, partial_msg)
 
 
 if __name__ == "__main__":
