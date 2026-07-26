@@ -89,7 +89,7 @@ export MEDGEMMA_TEXTATTACK_MODEL_ID="google/medgemma-4b-it"
 export MEDGEMMA_TEXTATTACK_SEED=765
 mkdir -p runs/textattack
 
-textattack attack \
+python -m textattack attack \
   --model-from-file text_attack/medgemma_textattack_wrapper.py \
   --dataset-from-file text_attack/u2bench_textattack_dataset.py \
   --attack-from-file text_attack/medgemma_textfooler_attack.py \

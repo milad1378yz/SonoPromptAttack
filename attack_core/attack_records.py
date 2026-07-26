@@ -5,20 +5,7 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from attack_core.u2bench import parse_options, resolve_label
-
-
-def split_prompt(prompt: str) -> Tuple[str, str]:
-    text = str(prompt or "")
-    patterns = [
-        r"(\\n\\noptions:.*)$",
-        r"(\n\noptions:.*)$",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
-        if match:
-            return text[: match.start()].strip(), match.group(1)
-    return text.strip(), ""
+from attack_core.u2bench import parse_options, resolve_label, split_prompt_options
 
 
 def _find_resume_files(attack_input: Path) -> List[Path]:
@@ -421,7 +408,7 @@ def load_attacked_samples(
             label_idx = int(label_after_attack)
             if 0 <= label_idx < len(options):
                 label_after_attack = str(options[label_idx])
-        editable_prompt, frozen_suffix = split_prompt(attacked_question)
+        editable_prompt, frozen_suffix = split_prompt_options(attacked_question)
         samples.append(
             {
                 "record": rec,

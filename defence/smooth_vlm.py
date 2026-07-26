@@ -8,20 +8,14 @@ workflows in this repository rather than text-only jailbreak detection.
 """
 
 import argparse
-import json
 import random
 import re
 import string
-import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Tuple
 
 from tqdm import tqdm
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from attack_core.attack_records import load_attacked_samples
 from attack_core.model_loader import load_vlm

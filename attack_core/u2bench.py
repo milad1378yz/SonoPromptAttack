@@ -44,6 +44,16 @@ def parse_options(options_field):
     return [p.strip().strip("'\"") for p in parts if p.strip()]
 
 
+def split_prompt_options(prompt: str) -> tuple[str, str]:
+    """Split a U2-Bench prompt into editable text and its options suffix."""
+    text = str(prompt or "")
+    for pattern in (r"(\\n\\noptions:.*)$", r"(\n\noptions:.*)$"):
+        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            return text[: match.start()].strip(), match.group(1)
+    return text.strip(), ""
+
+
 def _placeholder_value_to_text(value) -> str:
     try:
         if pd.isna(value):

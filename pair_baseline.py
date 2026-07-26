@@ -17,21 +17,13 @@ from transformers import BatchEncoding
 
 from attack_core.model_loader import load_llm, load_vlm
 from attack_core.run_outputs import append_jsonl, append_text, write_csv, write_json
-from attack_core.u2bench import decode_base64_image, parse_options, resolve_label
+from attack_core.u2bench import (
+    decode_base64_image,
+    parse_options,
+    resolve_label,
+    split_prompt_options,
+)
 from attack_core.vlm_scoring import compute_scores, format_option_scores
-
-
-def split_prompt(prompt: str):
-    text = str(prompt or "")
-    patterns = [
-        r"(\\n\\noptions:.*)$",
-        r"(\n\noptions:.*)$",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
-        if match:
-            return text[: match.start()].strip(), match.group(1)
-    return text.strip(), ""
 
 
 def load_local_samples(dataset_path: str):
@@ -46,7 +38,7 @@ def load_local_samples(dataset_path: str):
             if not options or not truth:
                 continue
             full_prompt = str(row.get("prompt", ""))
-            editable_prompt, frozen_suffix = split_prompt(full_prompt)
+            editable_prompt, frozen_suffix = split_prompt_options(full_prompt)
             samples.append(
                 {
                     "key": f"{tsv_path}:{row_index}",
@@ -275,7 +267,7 @@ def sanitize_candidate_prompt(candidate_prompt: str, original_editable: str):
         prompt = re.sub(r"\n?```$", "", prompt).strip()
     if prompt.lower().startswith("prompt:"):
         prompt = prompt.split(":", 1)[1].strip()
-    editable, _ = split_prompt(prompt)
+    editable, _ = split_prompt_options(prompt)
     return editable.strip() or original_editable
 
 
