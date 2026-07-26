@@ -1,1 +1,136 @@
-# vlm_attack
+# When Minor Edits Matter
+
+Official implementation of
+[When Minor Edits Matter: LLM-Driven Prompt Attack for Medical VLM Robustness in Ultrasound](https://arxiv.org/abs/2603.21047).
+The repository includes the MCTS attack, conventional search strategies, PAIR
+and TextAttack baselines, SmoothVLM defense, and transferability evaluation.
+
+## Setup
+
+Python 3.10 and an NVIDIA GPU are recommended. Create an environment and install
+the dependencies:
+
+```bash
+conda create -n vlm-attack python=3.10 -y
+conda activate vlm-attack
+pip install -r requirements.txt
+```
+
+Authenticate with Hugging Face and make sure your account can access the selected
+models:
+
+```bash
+huggingface-cli login
+```
+
+The primary attack downloads `DolphinAI/u2-bench` automatically. For all
+experiments, download a reusable local copy:
+
+```bash
+huggingface-cli download DolphinAI/u2-bench \
+  --repo-type dataset \
+  --local-dir dataset/u2-bench
+```
+
+## Running the code
+
+Run all commands from the repository root.
+
+### Main attack
+
+The following example uses MCTS, MedGemma, and a remote proposer LLM:
+
+```bash
+export LLM_API_KEY="your-api-key"
+
+python vlm_attack.py \
+  --dataset-path dataset/u2-bench/disease_diagnosis \
+  --vlm-id google/medgemma-4b-it \
+  --llm-id qwen/qwen3-30b-a3b-instruct-2507 \
+  --use-api \
+  --llm-api-provider openrouter \
+  --api-key "$LLM_API_KEY" \
+  --search-mode mcts \
+  --max-samples 10 \
+  --log-path runs/mcts/attack_log.txt \
+  --summary-dir runs/mcts/summaries
+```
+
+Remove `--max-samples` for a full run and use a new summary directory for each
+completed run. Available search modes are `mcts`, `ga`, `random`, `greedy`, and
+`beam`. To use a local proposer, omit `--use-api` and `--api-key`, then provide a
+local or Hugging Face model with `--llm-id`.
+
+Results are written beside `--log-path` and under `--summary-dir`. Interrupted
+runs resume from the summary directory.
+
+### PAIR baseline
+
+```bash
+python pair_baseline.py \
+  --dataset-path dataset/u2-bench/disease_diagnosis \
+  --vlm-id google/medgemma-4b-it \
+  --attacker-model openai/gpt-4.1-mini \
+  --use-api \
+  --attacker-api-provider openrouter \
+  --api-key "$LLM_API_KEY" \
+  --attack-correct-only \
+  --max-samples 10 \
+  --log-path runs/pair/pair_log.txt
+```
+
+### TextAttack baselines
+
+TextAttack processes one TSV file at a time:
+
+```bash
+export MEDGEMMA_TEXTATTACK_TSV="dataset/u2-bench/disease_diagnosis/path/to/task.tsv"
+export MEDGEMMA_TEXTATTACK_MODEL_ID="google/medgemma-4b-it"
+export MEDGEMMA_TEXTATTACK_SEED=765
+mkdir -p runs/textattack
+
+textattack attack \
+  --model-from-file text_attack/medgemma_textattack_wrapper.py \
+  --dataset-from-file text_attack/u2bench_textattack_dataset.py \
+  --attack-from-file text_attack/medgemma_textfooler_attack.py \
+  --num-examples 10 \
+  --query-budget 100 \
+  --model-batch-size 1 \
+  --random-seed 765 \
+  --log-to-csv runs/textattack/textfooler.csv
+```
+
+Replace the attack file with any of:
+
+- `medgemma_checklist_attack.py`
+- `medgemma_deepwordbug_attack.py`
+- `medgemma_greedy_char_substitution_attack.py`
+- `medgemma_random_char_search_attack.py`
+- `medgemma_textbugger_attack.py`
+- `medgemma_textfooler_attack.py`
+
+### SmoothVLM defense
+
+Evaluate successful attacks from a previous run:
+
+```bash
+python -m defence.smooth_vlm \
+  --attack-input runs/mcts/summaries \
+  --dataset-root dataset/u2-bench \
+  --vlm-id google/medgemma-4b-it
+```
+
+### Transferability
+
+Evaluate the same adversarial prompts on a second VLM:
+
+```bash
+export TARGET_VLM_ID="your-target-model-id"
+
+python -m transferability.transfer_vlm \
+  --attack-input runs/mcts/summaries \
+  --dataset-root dataset/u2-bench \
+  --target-vlm-id "$TARGET_VLM_ID"
+```
+
+Use `python <script> --help` or `python -m <module> --help` for all options.

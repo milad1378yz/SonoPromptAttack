@@ -82,6 +82,8 @@ def export_pair_summaries(records, summary_dir: Path, summary_format: str):
     written = []
     for tsv_file, rows in grouped.items():
         rel = Path(tsv_file)
+        if rel.is_absolute():
+            rel = Path(rel.name)
         out_dir = summary_dir / rel.parent
         out_dir.mkdir(parents=True, exist_ok=True)
         json_path = out_dir / f"{rel.stem}.pair_summary.json"
