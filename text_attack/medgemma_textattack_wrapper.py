@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 import numpy as np
-import torch
 import textattack
+import torch
 
 from attack_core.model_loader import load_vlm
 from attack_core.u2bench import decode_base64_image, parse_options
@@ -43,7 +43,9 @@ class TextAttackSettings:
         score_mode: str | None = None,
     ) -> "TextAttackSettings":
         raw_tsv_path = (
-            str(tsv_path) if tsv_path is not None else os.getenv("MEDGEMMA_TEXTATTACK_TSV", "")
+            str(tsv_path)
+            if tsv_path is not None
+            else os.getenv("MEDGEMMA_TEXTATTACK_TSV", "")
         ).strip()
         if not raw_tsv_path:
             raise ValueError("MEDGEMMA_TEXTATTACK_TSV is required.")
@@ -59,10 +61,14 @@ class TextAttackSettings:
             else os.getenv("MEDGEMMA_TEXTATTACK_SYSTEM_PROMPT", "")
         )
         resolved_score_mode = (
-            score_mode
-            if score_mode is not None
-            else os.getenv("MEDGEMMA_TEXTATTACK_SCORE_MODE", "teacher_forced")
-        ).strip().lower()
+            (
+                score_mode
+                if score_mode is not None
+                else os.getenv("MEDGEMMA_TEXTATTACK_SCORE_MODE", "teacher_forced")
+            )
+            .strip()
+            .lower()
+        )
         if resolved_score_mode not in {"teacher_forced", "generation_step"}:
             raise ValueError(
                 "MEDGEMMA_TEXTATTACK_SCORE_MODE must be "
@@ -98,7 +104,9 @@ def _ensure_vlm_device_map() -> None:
         )
 
 
-def _load_image_b64_by_tsv_row(tsv_path: Path, label_names: list[str]) -> dict[int, str]:
+def _load_image_b64_by_tsv_row(
+    tsv_path: Path, label_names: list[str]
+) -> dict[int, str]:
     import pandas as pd
 
     df = pd.read_csv(tsv_path, sep="\t")
@@ -114,7 +122,11 @@ def _load_options(tsv_path: Path) -> list[str]:
     import pandas as pd
 
     df = pd.read_csv(tsv_path, sep="\t")
-    return [option.strip() for option in parse_options(df.iloc[0]["options"]) if option.strip()]
+    return [
+        option.strip()
+        for option in parse_options(df.iloc[0]["options"])
+        if option.strip()
+    ]
 
 
 @lru_cache(maxsize=256)
@@ -131,7 +143,9 @@ class MedGemmaTextAttackWrapper(textattack.models.wrappers.ModelWrapper):
         self.system_prompt = settings.system_prompt
         self.score_mode = settings.score_mode
         self.options = _load_options(self.tsv_path)
-        self._image_b64_by_tsv_row = _load_image_b64_by_tsv_row(self.tsv_path, self.options)
+        self._image_b64_by_tsv_row = _load_image_b64_by_tsv_row(
+            self.tsv_path, self.options
+        )
         _ensure_vlm_device_map()
         self.vlm, self.processor = load_vlm(self.model_id)
         self.model = self.vlm
@@ -211,12 +225,16 @@ class MedGemmaTextAttackWrapper(textattack.models.wrappers.ModelWrapper):
     def __call__(self, text_input_list: Sequence[tuple[str, str]], **kwargs):
         outputs = []
         for item in text_input_list:
-            image_b64, _editable_prompt, _frozen_suffix, full_prompt = self._normalize_input(item)
+            image_b64, _editable_prompt, _frozen_suffix, full_prompt = (
+                self._normalize_input(item)
+            )
             outputs.append(self._score_options(image_b64, full_prompt))
         return np.stack(outputs, axis=0)
 
     def get_grad(self, text_input):
-        raise NotImplementedError("Gradient access is not implemented for MedGemma wrapper.")
+        raise NotImplementedError(
+            "Gradient access is not implemented for MedGemma wrapper."
+        )
 
     def _tokenize(self, inputs: Iterable):
         tokenized = []
