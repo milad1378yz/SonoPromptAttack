@@ -38,7 +38,10 @@ except ImportError:
     score_options_from_generation_step = None
 
 
-TSV_PATH = Path(os.getenv("MEDGEMMA_TEXTATTACK_TSV", "/home/yasamin/Documents/VLM/medgemma/23.tsv"))
+_TSV_ENV = os.getenv("MEDGEMMA_TEXTATTACK_TSV", "").strip()
+if not _TSV_ENV:
+    raise ValueError("MEDGEMMA_TEXTATTACK_TSV is required.")
+TSV_PATH = Path(_TSV_ENV)
 MODEL_ID = os.getenv("MEDGEMMA_TEXTATTACK_MODEL_ID", "google/medgemma-4b-it")
 SYSTEM_PROMPT = os.getenv("MEDGEMMA_TEXTATTACK_SYSTEM_PROMPT", "")
 SCORE_MODE = os.getenv("MEDGEMMA_TEXTATTACK_SCORE_MODE", "teacher_forced").strip().lower()

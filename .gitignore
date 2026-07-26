@@ -1,0 +1,33 @@
+.vscode/
+.env
+__pycache__
+*.txt
+!requirements.txt
+*temp*
+cache/
+runs/
+
+# Generated artifacts
+*.jsonl
+*.ipynb
+*.png
+*.csv
+*.pdf
+
+# Generated directories / outputs
+Baselines/
+Transition_Tables/
+Med VLM Results/
+text_attack/logs/
+__MACOSX/
+__pycache__/
+
+# Common run and cache outputs
+cache/
+runs/
+transferability/results
+defence/results
+
+dataset/
+
+*.md
