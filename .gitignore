@@ -4,6 +4,7 @@
 
 # Python-generated files
 __pycache__/
+.pytest_cache/
 *.py[cod]
 
 # Scratch data, downloaded datasets, caches, and run outputs

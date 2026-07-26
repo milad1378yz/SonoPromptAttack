@@ -59,7 +59,7 @@ class _SearchState:
 
 
 class GeneticSearch:
-    """Iteratively accept the best proposed edit until the prediction flips."""
+    """Genetic-style search that accepts the best edit until prediction flips."""
 
     def __init__(
         self,
