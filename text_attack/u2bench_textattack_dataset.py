@@ -1,8 +1,13 @@
 import os
+import sys
 from pathlib import Path
 
 import pandas as pd
 import textattack
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from attack_core.u2bench import normalize_u2bench_row, split_prompt_options
 from text_attack.medgemma_attack_common import image_placeholder
