@@ -4,13 +4,16 @@ This static explorer filters recorded examples by proposer LLM, target VLM,
 task, and example. It shows the exact dataset image, full original and attacked
 prompts, every recorded edit, predictions, ground truth, and source provenance.
 
-Serve this directory with any static web server:
+Install the small web wrapper and launch the explorer:
 
 ```bash
-python -m http.server 8000 --directory results_explorer
+cd results_explorer
+npm install
+npm run dev
 ```
 
-Then open `http://localhost:8000`.
+Then open `http://localhost:3000`. The root route opens the full interactive
+explorer; `public/explorer.html` contains the underlying static interface.
 
 ## Included result matrix
 

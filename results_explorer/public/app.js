@@ -30,7 +30,7 @@ function render(animate=false){
   const x=state.selected;if(!x)return;
   $("title").textContent=x.title;$("example-count").textContent=`${state.examples.indexOf(x)+1} of ${state.examples.length} recorded examples`;
   $("proposer-badge").textContent=`Proposer · ${x.proposer_model}`;$("target-badge").textContent=`Target · ${x.target_vlm}`;
-  $("ultrasound").src=`public/${x.image}`;$("ultrasound").alt=`Ultrasound image for ${x.title}, record ${x.key}`;
+  $("ultrasound").src=x.image;$("ultrasound").alt=`Ultrasound image for ${x.title}, record ${x.key}`;
   $("before").textContent=x.prediction_before;$("after").textContent=x.prediction_after;$("truth").textContent=x.ground_truth;
   $("changes").innerHTML=x.changes.map(c=>`<li><b>Step ${c.step}</b><br><del>${escapeHtml(c.previous)}</del> → <ins>${escapeHtml(c.replacement)}</ins></li>`).join("");
   $("record-key").textContent=x.key;
@@ -40,7 +40,7 @@ function render(animate=false){
 }
 function escapeHtml(value){const d=document.createElement("div");d.textContent=value;return d.innerHTML}
 
-fetch("public/data/examples.json").then(r=>r.json()).then(data=>{
+fetch("data/examples.json").then(r=>r.json()).then(data=>{
   state.examples=data;fill($("proposer"),unique(data,"proposer_model"));updateFilters("proposer");
   ["proposer","target","task","example"].forEach(id=>$(id).addEventListener("change",()=>updateFilters(id)));
   $("replay").addEventListener("click",()=>render(true));
