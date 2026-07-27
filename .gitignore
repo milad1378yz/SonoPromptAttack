@@ -12,6 +12,7 @@ __pycache__/
 /dataset/
 /cache/
 /runs/
+/evaluation/llm_as_judge/runs/
 
 # Default root-level outputs
 /attack_log.txt

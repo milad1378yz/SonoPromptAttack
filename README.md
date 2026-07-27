@@ -12,6 +12,9 @@ Official implementation of
 [When Minor Edits Matter: LLM-Driven Prompt Attack for Medical VLM Robustness in Ultrasound](https://arxiv.org/abs/2603.21047).
 The repository includes the MCTS attack, conventional search strategies and TextAttack baselines.
 
+Evaluation utilities, including the LLM-as-judge quality metrics, are documented
+in [`evaluation/README.md`](evaluation/README.md).
+
 ## Setup
 
 Python 3.10 and an NVIDIA GPU are recommended. Create an environment and install
@@ -101,4 +104,3 @@ Replace the attack file with any of:
 - `medgemma_random_char_search_attack.py`
 - `medgemma_textbugger_attack.py`
 - `medgemma_textfooler_attack.py`
-
