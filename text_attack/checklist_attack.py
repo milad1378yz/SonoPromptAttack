@@ -14,7 +14,7 @@ from textattack.transformations import (
     WordSwapExtend,
 )
 
-from text_attack.medgemma_attack_common import (
+from text_attack.vlm_attack_common import (
     VLM_FROZEN_COLUMNS,
     VLM_INPUT_COLUMNS,
     maybe_set_seed,

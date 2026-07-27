@@ -17,7 +17,7 @@ if str(REPO_ROOT) not in sys.path:
 from attack_core.model_loader import load_vlm
 from attack_core.u2bench import decode_base64_image, normalize_u2bench_row
 from attack_core.vlm_scoring import score_candidate
-from text_attack.medgemma_attack_common import (
+from text_attack.vlm_attack_common import (
     IMAGE_TSV_ROW_PREFIX,
     compose_transfer_prompt,
     maybe_set_seed,
@@ -42,20 +42,22 @@ class TextAttackSettings:
         raw_tsv_path = (
             str(tsv_path)
             if tsv_path is not None
-            else os.getenv("MEDGEMMA_TEXTATTACK_TSV", "")
+            else os.getenv("VLM_TEXTATTACK_TSV", "")
         ).strip()
         if not raw_tsv_path:
-            raise ValueError("MEDGEMMA_TEXTATTACK_TSV is required.")
+            raise ValueError("VLM_TEXTATTACK_TSV is required.")
 
         resolved_model_id = (
             model_id
             if model_id is not None
-            else os.getenv("MEDGEMMA_TEXTATTACK_MODEL_ID", "google/medgemma-4b-it")
+            else os.getenv("VLM_TEXTATTACK_MODEL_ID", "")
         ).strip()
+        if not resolved_model_id:
+            raise ValueError("VLM_TEXTATTACK_MODEL_ID is required.")
         resolved_system_prompt = (
             system_prompt
             if system_prompt is not None
-            else os.getenv("MEDGEMMA_TEXTATTACK_SYSTEM_PROMPT", "")
+            else os.getenv("VLM_TEXTATTACK_SYSTEM_PROMPT", "")
         )
 
         return cls(
@@ -82,7 +84,7 @@ def _ensure_vlm_device_map() -> None:
         os.environ["VLM_DEVICE_MAP"] = "cpu"
     else:
         os.environ["VLM_DEVICE_MAP"] = (
-            os.getenv("MEDGEMMA_TEXTATTACK_DEVICE_MAP", "cuda:0").strip() or "cuda:0"
+            os.getenv("VLM_TEXTATTACK_DEVICE_MAP", "cuda:0").strip() or "cuda:0"
         )
 
 
@@ -122,7 +124,7 @@ def _decode_image_cached(img_b64: str):
     return decode_base64_image(img_b64)
 
 
-class MedGemmaTextAttackWrapper(textattack.models.wrappers.ModelWrapper):
+class VLMTextAttackWrapper(textattack.models.wrappers.ModelWrapper):
     def __init__(self, settings: TextAttackSettings | None = None):
         settings = settings or TextAttackSettings.from_environment()
         self.tsv_path = settings.tsv_path
@@ -153,7 +155,7 @@ class MedGemmaTextAttackWrapper(textattack.models.wrappers.ModelWrapper):
         if isinstance(item, (tuple, list)):
             if len(item) < 2:
                 raise ValueError(
-                    "Expected (img_data, editable_prompt[, frozen_suffix]) tuple for MedGemma TextAttack wrapper."
+                    "Expected (img_data, editable_prompt[, frozen_suffix]) tuple for VLM TextAttack wrapper."
                 )
             premise = str(item[0])
             image_b64 = self._resolve_image_b64(premise)
@@ -196,7 +198,7 @@ class MedGemmaTextAttackWrapper(textattack.models.wrappers.ModelWrapper):
 
     def get_grad(self, text_input):
         raise NotImplementedError(
-            "Gradient access is not implemented for MedGemma wrapper."
+            "Gradient access is not implemented for VLM wrapper."
         )
 
     def _tokenize(self, inputs: Iterable):
@@ -216,20 +218,20 @@ class MedGemmaTextAttackWrapper(textattack.models.wrappers.ModelWrapper):
 # TextAttack loads --model-from-file under a temp_* module name, which breaks
 # multiprocessing pickling when --parallel is enabled. Re-register this file
 # under a stable import path so worker processes can unpickle the wrapper.
-_STABLE_MODULE = "text_attack.medgemma_textattack_wrapper"
+_STABLE_MODULE = "text_attack.vlm_textattack_wrapper"
 register_for_parallel_pickling(
     _STABLE_MODULE,
     Path(__file__),
     {
         "TextAttackSettings": TextAttackSettings,
-        "MedGemmaTextAttackWrapper": MedGemmaTextAttackWrapper,
+        "VLMTextAttackWrapper": VLMTextAttackWrapper,
     },
 )
 
 # Workers unpickle the attack object; loading another VLM at import time duplicates GPU memory.
 if _is_main_process():
     maybe_set_seed()
-    model = MedGemmaTextAttackWrapper()
+    model = VLMTextAttackWrapper()
 else:
     model = None
 sys.modules[_STABLE_MODULE].model = model

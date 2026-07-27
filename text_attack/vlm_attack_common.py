@@ -1,4 +1,4 @@
-"""Shared TextAttack setup for MedGemma VLM datasets."""
+"""Shared TextAttack setup for VLM datasets."""
 
 import os
 import sys
@@ -31,7 +31,7 @@ def compose_transfer_prompt(editable_prompt: str, frozen_suffix: str) -> str:
 
 
 def maybe_set_seed() -> int | None:
-    seed_text = os.getenv("MEDGEMMA_TEXTATTACK_SEED", "").strip()
+    seed_text = os.getenv("VLM_TEXTATTACK_SEED", "").strip()
     if not seed_text:
         return None
     try:

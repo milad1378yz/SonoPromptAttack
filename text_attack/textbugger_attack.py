@@ -16,7 +16,7 @@ from textattack.transformations import (
     WordSwapRandomCharacterInsertion,
 )
 
-from text_attack.medgemma_attack_common import (
+from text_attack.vlm_attack_common import (
     VLM_FROZEN_COLUMNS,
     VLM_INPUT_COLUMNS,
     force_tensorflow_cpu,

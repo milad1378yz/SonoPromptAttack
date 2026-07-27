@@ -16,6 +16,19 @@ Evaluation utilities include lexical and semantic similarity metrics,
 perplexity, and an LLM-as-judge quality rubric. See
 [`evaluation/README.md`](evaluation/README.md) for the full metric definitions.
 
+## Overview
+
+<p align="center">
+  <img src="assets/sonopromptattack_overview.png"
+       alt="Overview of the SonoPromptAttack framework"
+       width="100%">
+</p>
+
+SonoPromptAttack uses a proposer LLM to generate minimal prompt edits, removes
+invalid candidates with deterministic filtering, and applies Monte Carlo Tree
+Search with target-VLM scoring until the prediction changes or the search
+budget is exhausted.
+
 ## Setup
 
 Python 3.10 and an NVIDIA GPU are recommended. Create an environment and install
@@ -49,15 +62,17 @@ Run all commands from the repository root.
 
 ### Main attack
 
-The following example uses MCTS, MedGemma, and a remote proposer LLM:
+Set the target VLM and proposer LLM independently, then run MCTS:
 
 ```bash
 export LLM_API_KEY="your-api-key"
+export VLM_MODEL_ID="your-hugging-face-vlm-id"
+export PROPOSER_LLM_ID="your-proposer-llm-id"
 
 python vlm_attack.py \
   --dataset-path dataset/u2-bench/disease_diagnosis \
-  --vlm-id google/medgemma-4b-it \
-  --llm-id qwen/qwen3-30b-a3b-instruct-2507 \
+  --vlm-id "$VLM_MODEL_ID" \
+  --llm-id "$PROPOSER_LLM_ID" \
   --use-api \
   --llm-api-provider openrouter \
   --api-key "$LLM_API_KEY" \
@@ -116,15 +131,16 @@ credential is stored in the repository or accepted on the command line.
 TextAttack processes one TSV file at a time:
 
 ```bash
-export MEDGEMMA_TEXTATTACK_TSV="dataset/u2-bench/disease_diagnosis/path/to/task.tsv"
-export MEDGEMMA_TEXTATTACK_MODEL_ID="google/medgemma-4b-it"
-export MEDGEMMA_TEXTATTACK_SEED=765
+export VLM_MODEL_ID="your-hugging-face-vlm-id"
+export VLM_TEXTATTACK_TSV="dataset/u2-bench/disease_diagnosis/path/to/task.tsv"
+export VLM_TEXTATTACK_MODEL_ID="$VLM_MODEL_ID"
+export VLM_TEXTATTACK_SEED=765
 mkdir -p runs/textattack
 
 python -m textattack attack \
-  --model-from-file text_attack/medgemma_textattack_wrapper.py \
+  --model-from-file text_attack/vlm_textattack_wrapper.py \
   --dataset-from-file text_attack/u2bench_textattack_dataset.py \
-  --attack-from-file text_attack/medgemma_textfooler_attack.py \
+  --attack-from-file text_attack/textfooler_attack.py \
   --num-examples 10 \
   --query-budget 100 \
   --model-batch-size 1 \
@@ -134,9 +150,13 @@ python -m textattack attack \
 
 Replace the attack file with any of:
 
-- `medgemma_checklist_attack.py`
-- `medgemma_deepwordbug_attack.py`
-- `medgemma_greedy_char_substitution_attack.py`
-- `medgemma_random_char_search_attack.py`
-- `medgemma_textbugger_attack.py`
-- `medgemma_textfooler_attack.py`
+- `checklist_attack.py`
+- `deepwordbug_attack.py`
+- `greedy_char_substitution_attack.py`
+- `random_char_search_attack.py`
+- `textbugger_attack.py`
+- `textfooler_attack.py`
+
+The TextAttack wrapper uses the same shared VLM loader as the main attack.
+Set `VLM_TEXTATTACK_MODEL_ID` to any compatible Hugging Face image-to-text VLM;
+the baseline code is not tied to a specific model family.

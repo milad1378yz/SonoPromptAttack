@@ -17,7 +17,7 @@ from textattack.goal_functions import UntargetedClassification
 from textattack.search_methods import SearchMethod
 from textattack.transformations import Transformation
 
-from text_attack.medgemma_attack_common import (
+from text_attack.vlm_attack_common import (
     char_level_constraints,
     maybe_set_seed,
     register_for_parallel_pickling,
@@ -134,7 +134,7 @@ def attack(model_wrapper):
 
 
 register_for_parallel_pickling(
-    "text_attack.medgemma_random_char_search_attack",
+    "text_attack.random_char_search_attack",
     Path(__file__),
     {
         "RandomCharacterSubstitution": RandomCharacterSubstitution,

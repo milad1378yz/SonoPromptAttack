@@ -5,7 +5,7 @@ from textattack.goal_functions import UntargetedClassification
 from textattack.search_methods import GreedyWordSwapWIR
 from textattack.transformations import WordSwapRandomCharacterSubstitution
 
-from text_attack.medgemma_attack_common import char_level_constraints, maybe_set_seed
+from text_attack.vlm_attack_common import char_level_constraints, maybe_set_seed
 
 
 def attack(model_wrapper):

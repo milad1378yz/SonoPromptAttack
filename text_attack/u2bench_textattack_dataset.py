@@ -10,13 +10,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from attack_core.u2bench import normalize_u2bench_row, split_prompt_options
-from text_attack.medgemma_attack_common import image_placeholder
+from text_attack.vlm_attack_common import image_placeholder
 
 
 def _textattack_tsv_path() -> Path:
-    raw_path = os.getenv("MEDGEMMA_TEXTATTACK_TSV", "").strip()
+    raw_path = os.getenv("VLM_TEXTATTACK_TSV", "").strip()
     if not raw_path:
-        raise ValueError("MEDGEMMA_TEXTATTACK_TSV is required.")
+        raise ValueError("VLM_TEXTATTACK_TSV is required.")
     return Path(raw_path).expanduser()
 
 
@@ -36,7 +36,7 @@ def _load_dataset(tsv_path: Path):
     label_map = {name: idx for idx, name in enumerate(label_names)}
     rows = []
 
-    # premise = image placeholder keyed by TSV row index (resolved in medgemma_textattack_wrapper)
+    # premise = image placeholder keyed by TSV row index (resolved in vlm_textattack_wrapper)
     for tsv_row_index, row in df.iterrows():
         prompt, options, truth = normalize_u2bench_row(
             row,
