@@ -10,8 +10,7 @@
 
 Official implementation of
 [When Minor Edits Matter: LLM-Driven Prompt Attack for Medical VLM Robustness in Ultrasound](https://arxiv.org/abs/2603.21047).
-The repository includes the MCTS attack, conventional search strategies, PAIR
-and TextAttack baselines, SmoothVLM defense, and transferability evaluation.
+The repository includes the MCTS attack, conventional search strategies and TextAttack baselines.
 
 ## Setup
 
