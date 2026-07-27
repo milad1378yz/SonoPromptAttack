@@ -77,17 +77,11 @@ runs resume from the summary directory.
 
 ## Evaluation
 
-The attack runner's `*.attack_summary.csv` files can be passed directly to both
-evaluators. Run commands from the repository root.
+The attack runner's `*.attack_summary.csv` files can be passed directly to
+evaluators. 
 
-Calculate Levenshtein distance, BLEU, chrF, ROUGE-1, and ROUGE-L:
 
-```bash
-bash evaluation/similarity/run.sh \
-  runs/mcts/summaries/path/to/task.attack_summary.csv
-```
-
-To also calculate embedding cosine similarity and perplexity:
+To calculate embedding cosine similarity and perplexity:
 
 ```bash
 bash evaluation/similarity/run.sh \
