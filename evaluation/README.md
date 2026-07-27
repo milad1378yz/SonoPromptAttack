@@ -1,8 +1,9 @@
 # Evaluation
 
-This folder contains the paper's evaluation utilities. LLM-judge outputs and
-all of their aggregate metrics are written below `runs/evaluation/`, which is
-ignored by Git.
+This folder contains the paper's evaluation utilities. By default, LLM-judge
+outputs and all aggregate metrics are written to
+`evaluation/results/llm_as_judge/`. The runner creates that directory
+automatically, and generated results are ignored by Git.
 
 ## LLM as judge
 
@@ -34,7 +35,7 @@ For a directory:
 ```bash
 bash evaluation/llm_as_judge/run.sh \
   path/to/successful_attack_csvs \
-  runs/evaluation/llm_as_judge
+  evaluation/results/llm_as_judge
 ```
 
 The runner never reads a key from a repository file or accepts one as a command

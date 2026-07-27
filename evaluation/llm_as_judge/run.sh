@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
 INPUT_PATH="${1:-}"
-OUTPUT_DIR="${2:-$REPO_ROOT/runs/evaluation/llm_as_judge}"
+OUTPUT_DIR="${2:-$REPO_ROOT/evaluation/results/llm_as_judge}"
 JUDGE_MODEL="${3:-${OPENROUTER_MODEL:-}}"
 
 if [[ -z "$INPUT_PATH" ]]; then
