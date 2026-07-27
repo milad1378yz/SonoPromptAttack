@@ -32,15 +32,16 @@ budget is exhausted.
 ## Results at a glance
 
 <p align="center">
-  <img src="assets/professional_results_demo.gif"
-       alt="Animated real attack results showing original prompts, minimal edits, and prediction flips"
+  <img src="assets/exact_results_typing_demo.gif"
+       alt="Typing animation of exact attack prompts, ultrasound images, edits, and prediction flips"
        width="100%">
 </p>
 
-The demo presents two real examples selected from the Trillium MCTS run
-summaries. Each sequence compares the original and attacked prompts, isolates
-the single minimal edit, and shows the target VLM prediction before and after
-the attack.
+The demo replays four examples selected from the Trillium MCTS run summaries.
+Each sequence uses the exact dataset image, types the recorded prompt, lists
+every edit, and shows the target VLM prediction before and after the attack.
+The companion `results_explorer/` app provides the complete prompts and lets
+readers filter examples by proposer LLM, target VLM, and task.
 
 ## Setup
 
