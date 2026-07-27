@@ -29,6 +29,18 @@ invalid candidates with deterministic filtering, and applies Monte Carlo Tree
 Search with target-VLM scoring until the prediction changes or the search
 budget is exhausted.
 
+## Results at a glance
+
+<p align="center">
+  <img src="assets/results_at_a_glance.gif"
+       alt="Animated qualitative attack examples and aggregate attack success rates"
+       width="100%">
+</p>
+
+The animation shows two one-edit prediction flips selected from the Trillium
+MCTS run summaries, followed by aggregate attack success rates across target
+Med-VLMs, anatomies, and proposer LLMs.
+
 ## Setup
 
 Python 3.10 and an NVIDIA GPU are recommended. Create an environment and install
