@@ -34,6 +34,23 @@ The default embedding and perplexity models can be changed with
 select the device. Model-backed metrics download their selected Hugging Face
 models on first use.
 
+The default models are:
+
+- semantic similarity: `google/embeddinggemma-300m`, using mean-pooled token
+  embeddings and cosine similarity;
+- perplexity: `google/gemma-3-4b-pt`, using causal language-model loss
+  separately for the original and attacked questions.
+
+For example, the explicit equivalent of the defaults is:
+
+```bash
+bash evaluation/similarity/run.sh path/to/attack_summary.csv \
+  --include_semantic \
+  --embedding_model google/embeddinggemma-300m \
+  --include_perplexity \
+  --lm_model google/gemma-3-4b-pt
+```
+
 Inputs must contain `final_question` and either `base_question` or
 `original_question`. Outputs include row-level `*.sims.csv`, per-input
 `*.statistics.csv`, and `scenario_similarity_summary.csv`. Per-model JSON

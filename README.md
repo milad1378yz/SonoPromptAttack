@@ -78,8 +78,7 @@ runs resume from the summary directory.
 ## Evaluation
 
 The attack runner's `*.attack_summary.csv` files can be passed directly to
-evaluators. 
-
+evaluators.
 
 To calculate embedding cosine similarity and perplexity:
 
@@ -90,6 +89,13 @@ bash evaluation/similarity/run.sh \
   --include_semantic \
   --include_perplexity
 ```
+
+By default, semantic similarity uses
+[`google/embeddinggemma-300m`](https://huggingface.co/google/embeddinggemma-300m)
+and perplexity uses
+[`google/gemma-3-4b-pt`](https://huggingface.co/google/gemma-3-4b-pt).
+Override them with `--embedding_model MODEL_ID` and `--lm_model MODEL_ID`,
+respectively.
 
 Run the LLM judge after setting its model and providing the OpenRouter
 credential through the environment:
