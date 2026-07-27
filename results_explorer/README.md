@@ -12,7 +12,7 @@ npm install
 npm run dev
 ```
 
-Then open the local URL printed by Vite (normally `http://localhost:5173`).
+Then open the local URL printed by vinext (normally `http://localhost:3001`).
 
 ## Included result matrix
 
