@@ -72,20 +72,6 @@ local or Hugging Face model with `--llm-id`.
 Results are written beside `--log-path` and under `--summary-dir`. Interrupted
 runs resume from the summary directory.
 
-### PAIR baseline
-
-```bash
-python pair_baseline.py \
-  --dataset-path dataset/u2-bench/disease_diagnosis \
-  --vlm-id google/medgemma-4b-it \
-  --attacker-model openai/gpt-4.1-mini \
-  --use-api \
-  --attacker-api-provider openrouter \
-  --api-key "$LLM_API_KEY" \
-  --attack-correct-only \
-  --max-samples 10 \
-  --log-path runs/pair/pair_log.txt
-```
 
 ### TextAttack baselines
 
@@ -117,28 +103,3 @@ Replace the attack file with any of:
 - `medgemma_textbugger_attack.py`
 - `medgemma_textfooler_attack.py`
 
-### SmoothVLM defense
-
-Evaluate successful attacks from a previous run:
-
-```bash
-python -m defence.smooth_vlm \
-  --attack-input runs/mcts/summaries \
-  --dataset-root dataset/u2-bench \
-  --vlm-id google/medgemma-4b-it
-```
-
-### Transferability
-
-Evaluate the same adversarial prompts on a second VLM:
-
-```bash
-export TARGET_VLM_ID="your-target-model-id"
-
-python -m transferability.transfer_vlm \
-  --attack-input runs/mcts/summaries \
-  --dataset-root dataset/u2-bench \
-  --target-vlm-id "$TARGET_VLM_ID"
-```
-
-Use `python <script> --help` or `python -m <module> --help` for all options.
