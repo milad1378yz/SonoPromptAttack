@@ -37,9 +37,9 @@ budget is exhausted.
        width="100%">
 </p>
 
-The animation shows two one-edit prediction flips selected from the Trillium
-MCTS run summaries, followed by aggregate attack success rates across target
-Med-VLMs, anatomies, and proposer LLMs.
+The demo replays two one-edit prediction flips selected from the Trillium MCTS
+run summaries, showing the original prediction, proposed edit, target-model
+re-scoring, and attacked prediction.
 
 ## Setup
 
