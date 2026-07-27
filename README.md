@@ -32,14 +32,15 @@ budget is exhausted.
 ## Results at a glance
 
 <p align="center">
-  <img src="assets/attack_whiteboard_demo.gif"
-       alt="Whiteboard animation showing original prompts, minimal edits, and attacked predictions"
+  <img src="assets/professional_results_demo.gif"
+       alt="Animated real attack results showing original prompts, minimal edits, and prediction flips"
        width="100%">
 </p>
 
-The whiteboard demo writes out two real prompts selected from the Trillium MCTS
-run summaries, marks each changed phrase with a line and arrow, then shows the
-attacked prompt and resulting prediction flip.
+The demo presents two real examples selected from the Trillium MCTS run
+summaries. Each sequence compares the original and attacked prompts, isolates
+the single minimal edit, and shows the target VLM prediction before and after
+the attack.
 
 ## Setup
 
