@@ -91,9 +91,9 @@ bash evaluation/similarity/run.sh \
 ```
 
 By default, semantic similarity uses
-[`google/embeddinggemma-300m`](https://huggingface.co/google/embeddinggemma-300m)
+[`BAAI/bge-m3`](https://huggingface.co/BAAI/bge-m3)
 and perplexity uses
-[`google/gemma-3-4b-pt`](https://huggingface.co/google/gemma-3-4b-pt).
+[`microsoft/phi-2`](https://huggingface.co/microsoft/phi-2).
 Override them with `--embedding_model MODEL_ID` and `--lm_model MODEL_ID`,
 respectively.
 

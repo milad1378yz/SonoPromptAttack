@@ -34,11 +34,11 @@ The default embedding and perplexity models can be changed with
 select the device. Model-backed metrics download their selected Hugging Face
 models on first use.
 
-The default models are:
+The paper's default evaluator models are:
 
-- semantic similarity: `google/embeddinggemma-300m`, using mean-pooled token
-  embeddings and cosine similarity;
-- perplexity: `google/gemma-3-4b-pt`, using causal language-model loss
+- semantic similarity (Sim): `BAAI/bge-m3`, using mean-pooled token embeddings
+  and cosine similarity;
+- linguistic fluency (PPL): `microsoft/phi-2`, using causal language-model loss
   separately for the original and attacked questions.
 
 For example, the explicit equivalent of the defaults is:
@@ -46,9 +46,9 @@ For example, the explicit equivalent of the defaults is:
 ```bash
 bash evaluation/similarity/run.sh path/to/attack_summary.csv \
   --include_semantic \
-  --embedding_model google/embeddinggemma-300m \
+  --embedding_model BAAI/bge-m3 \
   --include_perplexity \
-  --lm_model google/gemma-3-4b-pt
+  --lm_model microsoft/phi-2
 ```
 
 Inputs must contain `final_question` and either `base_question` or

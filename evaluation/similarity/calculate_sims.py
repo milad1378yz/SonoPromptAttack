@@ -574,12 +574,12 @@ def parse_args():
     )
     parser.add_argument(
         "--embedding_model",
-        default="google/embeddinggemma-300m",
+        default="BAAI/bge-m3",
         help="Sentence embedding model for semantic similarity",
     )
     parser.add_argument(
         "--lm_model",
-        default="google/gemma-3-4b-pt",
+        default="microsoft/phi-2",
         help="Language model used for perplexity",
     )
     parser.add_argument(
