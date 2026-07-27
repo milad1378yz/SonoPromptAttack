@@ -12,8 +12,7 @@ npm install
 npm run dev
 ```
 
-Then open `http://localhost:3000`. The root route opens the full interactive
-explorer; `public/explorer.html` contains the underlying static interface.
+Then open the local URL printed by Vite (normally `http://localhost:5173`).
 
 ## Included result matrix
 
