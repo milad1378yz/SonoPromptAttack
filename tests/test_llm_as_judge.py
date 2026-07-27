@@ -70,6 +70,12 @@ class JudgeTests(unittest.TestCase):
                     {
                         "original_question": "What is shown?",
                         "final_question": "What does this image show?",
+                        "attack_success": True,
+                    },
+                    {
+                        "original_question": "What is shown?",
+                        "final_question": "This attack did not succeed.",
+                        "attack_success": False,
                     }
                 ]
             ).to_csv(csv_path, index=False)
@@ -96,6 +102,7 @@ class JudgeTests(unittest.TestCase):
             self.assertEqual(stats["successful_attack_count"], 1)
             self.assertEqual(stats["is_natural_rate"], 1.0)
             self.assertEqual(stats["has_weird_artifacts_rate"], 0.0)
+            generate.assert_called_once()
             self.assertTrue(
                 (root / "model-a__model-b__mcts.judge.csv").is_file()
             )

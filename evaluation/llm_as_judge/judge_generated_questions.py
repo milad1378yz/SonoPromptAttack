@@ -42,6 +42,24 @@ def scenario_from_df(df: pd.DataFrame, csv_path: Path):
     return "", "", csv_path.stem
 
 
+def keep_successful_attacks(df: pd.DataFrame):
+    success_column = next(
+        (name for name in ("attack_success", "success") if name in df.columns),
+        None,
+    )
+    if success_column is None:
+        return df
+
+    def is_success(value):
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)) and not pd.isna(value):
+            return bool(value)
+        return str(value).strip().lower() in {"true", "1", "yes", "successful"}
+
+    return df[df[success_column].map(is_success)].copy()
+
+
 def load_rubric(categories_file: Path):
     rubric = json.loads(categories_file.read_text())
     allowed_labels = rubric["allowed_labels"]
@@ -484,12 +502,13 @@ def process_csv(
         }
         stats_path.write_text(json.dumps(stats, indent=2))
         return stats
+    df = keep_successful_attacks(df)
     if limit is not None:
         df = df.head(limit).copy()
 
     if df.empty:
         df.to_csv(judgments_path, index=False)
-        return {
+        stats = {
             "attacker_model": "",
             "target_model": "",
             "search_mode": csv_path.stem,
@@ -498,6 +517,8 @@ def process_csv(
             "rubric_name": rubric["rubric_name"],
             "successful_attack_count": 0,
         }
+        stats_path.write_text(json.dumps(stats, indent=2))
+        return stats
 
     if "base_question" not in df.columns and "original_question" in df.columns:
         df["base_question"] = df["original_question"]

@@ -12,8 +12,9 @@ Official implementation of
 [When Minor Edits Matter: LLM-Driven Prompt Attack for Medical VLM Robustness in Ultrasound](https://arxiv.org/abs/2603.21047).
 The repository includes the MCTS attack, conventional search strategies and TextAttack baselines.
 
-Evaluation utilities, including the LLM-as-judge quality metrics, are documented
-in [`evaluation/README.md`](evaluation/README.md).
+Evaluation utilities include lexical and semantic similarity metrics,
+perplexity, and an LLM-as-judge quality rubric. See
+[`evaluation/README.md`](evaluation/README.md) for the full metric definitions.
 
 ## Setup
 
@@ -73,6 +74,41 @@ local or Hugging Face model with `--llm-id`.
 
 Results are written beside `--log-path` and under `--summary-dir`. Interrupted
 runs resume from the summary directory.
+
+## Evaluation
+
+The attack runner's `*.attack_summary.csv` files can be passed directly to both
+evaluators. Run commands from the repository root.
+
+Calculate Levenshtein distance, BLEU, chrF, ROUGE-1, and ROUGE-L:
+
+```bash
+bash evaluation/similarity/run.sh \
+  runs/mcts/summaries/path/to/task.attack_summary.csv
+```
+
+To also calculate embedding cosine similarity and perplexity:
+
+```bash
+bash evaluation/similarity/run.sh \
+  runs/mcts/summaries/path/to/task.attack_summary.csv \
+  evaluation/results/similarity \
+  --include_semantic \
+  --include_perplexity
+```
+
+Run the LLM judge after setting its model and providing the OpenRouter
+credential through the environment:
+
+```bash
+export OPENROUTER_MODEL="openai/gpt-4o-mini"
+bash evaluation/llm_as_judge/run.sh \
+  runs/mcts/summaries/path/to/task.attack_summary.csv
+```
+
+Both tools also accept a directory of CSV files. Results are created
+automatically under `evaluation/results/`, which is excluded from Git. No
+credential is stored in the repository or accepted on the command line.
 
 
 ### TextAttack baselines
