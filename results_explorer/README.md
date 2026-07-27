@@ -4,6 +4,8 @@ This static explorer filters recorded examples by proposer LLM, target VLM,
 task, and example. It shows the exact dataset image, full original and attacked
 prompts, every recorded edit, predictions, ground truth, and source provenance.
 
+**[Open the live interactive explorer](https://sonopromptattack-results.ptekieh.chatgpt.site)**
+
 Install the small web wrapper and launch the explorer:
 
 ```bash

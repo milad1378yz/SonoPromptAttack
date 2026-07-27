@@ -29,19 +29,22 @@ invalid candidates with deterministic filtering, and applies Monte Carlo Tree
 Search with target-VLM scoring until the prediction changes or the search
 budget is exhausted.
 
-## Results at a glance
+## Interactive results explorer
 
 <p align="center">
-  <img src="assets/exact_results_typing_demo.gif"
-       alt="Typing animation of exact attack prompts, ultrasound images, edits, and prediction flips"
-       width="100%">
+  <a href="https://sonopromptattack-results.ptekieh.chatgpt.site">
+    <img src="https://img.shields.io/badge/Open-Interactive%20Result%20Explorer-235347?style=for-the-badge"
+         alt="Open the interactive SonoPromptAttack result explorer">
+  </a>
 </p>
 
-The demo replays four examples selected from the Trillium MCTS run summaries.
-Each sequence uses the exact dataset image, types the recorded prompt, lists
-every edit, and shows the target VLM prediction before and after the attack.
-The companion `results_explorer/` app provides the complete prompts and lets
-readers filter examples by proposer LLM, target VLM, and task.
+The live explorer shows the exact ultrasound image, full original and attacked
+prompts, every recorded edit, predictions, and ground truth. Select any of four
+proposer LLMs and five target MedVLMs, then browse ten examples for each model
+pair (200 examples in total).
+
+The complete explorer source and local-run instructions are available in
+[`results_explorer/`](results_explorer/).
 
 ## Setup
 
