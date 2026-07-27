@@ -32,14 +32,14 @@ budget is exhausted.
 ## Results at a glance
 
 <p align="center">
-  <img src="assets/results_at_a_glance.gif"
-       alt="Animated qualitative attack examples and aggregate attack success rates"
+  <img src="assets/attack_whiteboard_demo.gif"
+       alt="Whiteboard animation showing original prompts, minimal edits, and attacked predictions"
        width="100%">
 </p>
 
-The demo replays two one-edit prediction flips selected from the Trillium MCTS
-run summaries, showing the original prediction, proposed edit, target-model
-re-scoring, and attacked prediction.
+The whiteboard demo writes out two real prompts selected from the Trillium MCTS
+run summaries, marks each changed phrase with a line and arrow, then shows the
+attacked prompt and resulting prediction flip.
 
 ## Setup
 
