@@ -159,7 +159,7 @@ python -m textattack attack \
   --dataset-from-file text_attack/u2bench_textattack_dataset.py \
   --attack-from-file text_attack/textfooler_attack.py \
   --num-examples 10 \
-  --query-budget 100 \
+  --query-budget 80 \
   --model-batch-size 1 \
   --random-seed 765 \
   --log-to-csv runs/textattack/textfooler.csv
