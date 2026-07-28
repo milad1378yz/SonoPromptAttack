@@ -4,7 +4,7 @@ This static explorer filters recorded examples by proposer LLM, target VLM,
 task, and example. It shows the exact dataset image, full original and attacked
 prompts, every recorded edit, predictions, ground truth, and source provenance.
 
-**[Open the live interactive explorer](https://milad1378yz.github.io/SonoPromptAttack/)**
+**[Open the live interactive explorer](https://yasamin-med.github.io/SonoPromptAttack/)**
 
 Install the small web wrapper and launch the explorer:
 

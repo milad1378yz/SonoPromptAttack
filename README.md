@@ -32,7 +32,7 @@ budget is exhausted.
 ## Interactive results explorer
 
 <p align="center">
-  <a href="https://milad1378yz.github.io/SonoPromptAttack/">
+  <a href="https://yasamin-med.github.io/SonoPromptAttack/">
     <img src="https://img.shields.io/badge/Open-Interactive%20Result%20Explorer-235347?style=for-the-badge"
          alt="Open the interactive SonoPromptAttack result explorer">
   </a>
