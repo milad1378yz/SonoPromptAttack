@@ -121,6 +121,10 @@ def save_image(encoded: str, output_path: Path):
     image.save(output_path, quality=88, optimize=True)
 
 
+def normalized_text(value):
+    return str(value or "").replace("\\n", "\n").strip()
+
+
 def build():
     args = parse_args()
     grouped = collect_candidates(args.runs_root)
@@ -156,12 +160,27 @@ def build():
                 row = read_tsv_row(dataset_path, row_index)
             except (StopIteration, OSError, csv.Error):
                 continue
-            usable.append((candidate, dataset_path, row_index, row))
+            if normalized_text(record.get("original_question")) != normalized_text(
+                row.get("prompt")
+            ):
+                continue
+            if str(record.get("real_label")) != str(row.get("class_label")):
+                continue
+            usable.append(
+                (candidate, key, tsv_name, dataset_path, row_index, row)
+            )
             if len(usable) == args.per_pair:
                 break
         if len(usable) < args.per_pair:
             shortages.append((proposer, target, len(usable)))
-        for rank, (candidate, dataset_path, row_index, row) in enumerate(usable, 1):
+        for rank, (
+            candidate,
+            key,
+            tsv_name,
+            dataset_path,
+            row_index,
+            row,
+        ) in enumerate(usable, 1):
             record = candidate["record"]
             task = candidate["task"]
             image_name = f"{task.lower()}-{dataset_path.stem}-{row_index}.jpg"
