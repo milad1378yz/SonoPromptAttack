@@ -2,6 +2,7 @@
   <h1>When Minor Edits Matter</h1>
   <p><strong>LLM-Driven Prompt Attack for Medical VLM Robustness in Ultrasound</strong></p>
   <p>
+    <a href="https://sonopromptattack.github.io/"><img src="https://img.shields.io/badge/Project-Website-235347.svg?logo=googlechrome&logoColor=white" alt="Project website"></a>
     <a href="https://arxiv.org/abs/2603.21047"><img src="https://img.shields.io/badge/arXiv-2603.21047-b31b1b.svg" alt="arXiv"></a>
     <img src="https://img.shields.io/badge/Python-3.10-3776AB.svg?logo=python&logoColor=white" alt="Python 3.10">
     <img src="https://img.shields.io/badge/PyTorch-2.7-EE4C2C.svg?logo=pytorch&logoColor=white" alt="PyTorch 2.7">
@@ -32,7 +33,7 @@ budget is exhausted.
 ## Interactive results explorer
 
 <p align="center">
-  <a href="https://yasamin-med.github.io/SonoPromptAttack/">
+  <a href="https://sonopromptattack.github.io/explorer">
     <img src="https://img.shields.io/badge/Open-Interactive%20Result%20Explorer-235347?style=for-the-badge"
          alt="Open the interactive SonoPromptAttack result explorer">
   </a>
@@ -42,9 +43,6 @@ The live explorer shows the exact ultrasound image, full original and attacked
 prompts, every recorded edit, predictions, and ground truth. Select any of four
 proposer LLMs and five target MedVLMs, then browse ten examples for each model
 pair (200 examples in total).
-
-The complete explorer source and local-run instructions are available in
-[`results_explorer/`](results_explorer/).
 
 ## Setup
 
